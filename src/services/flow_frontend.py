@@ -355,6 +355,7 @@ class FlowFrontendMixin:
         output_spec: Optional[Any] = None,
     ) -> tuple[str, List[Any]]:
         prompt_value = self._frontend_prompt(prompt)
+        prompt_message = [None, None, prompt_value]
         aspect_value = self._map_frontend_video_aspect_ratio(aspect_ratio)
         metadata = self._frontend_generation_metadata(session_id)
         resolution_value = self._frontend_video_resolution(resolution)
@@ -368,7 +369,7 @@ class FlowFrontendMixin:
             ]
             rpc_id = "MZZa6b"
             request = [
-                prompt_value,
+                prompt_message,
                 references,
                 model_key,
                 aspect_value,
@@ -384,7 +385,7 @@ class FlowFrontendMixin:
         elif normalized_mode == "start_end":
             rpc_id = "nprQif"
             request = [
-                prompt_value,
+                prompt_message,
                 model_key,
                 aspect_value,
                 None,
@@ -397,7 +398,7 @@ class FlowFrontendMixin:
         elif normalized_mode == "start":
             rpc_id = "eb1hJf"
             request = [
-                prompt_value,
+                prompt_message,
                 model_key,
                 aspect_value,
                 None,
@@ -412,7 +413,7 @@ class FlowFrontendMixin:
             rpc_id = "fZytfe"
             request = [
                 [None, str(video_media_id or "").strip()],
-                prompt_value,
+                prompt_message,
                 model_key,
                 aspect_value,
                 None,
@@ -438,7 +439,7 @@ class FlowFrontendMixin:
         else:
             rpc_id = "YhhmEf"
             request = [
-                [None, None, prompt_value],
+                prompt_message,
                 model_key,
                 aspect_value,
                 None,

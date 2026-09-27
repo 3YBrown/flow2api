@@ -280,6 +280,23 @@ class VeoLiteFlowClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request_data[2], 2)
         self.assertTrue(rpc["argument"][2][0])
 
+    def test_reference_video_uses_current_prompt_and_media_envelopes(self):
+        rpc_id, argument = self.client._build_frontend_video_generation_argument(
+            project_id="22222222-2222-2222-2222-222222222222",
+            prompt="参考图视频",
+            model_key="abra_r2v_10s",
+            aspect_ratio="VIDEO_ASPECT_RATIO_LANDSCAPE",
+            recaptcha_token="recaptcha-token",
+            session_id="session-id",
+            mode="references",
+            reference_media_ids=["reference-media"],
+        )
+
+        self.assertEqual(rpc_id, "MZZa6b")
+        request_data = argument[0][0]
+        self.assertEqual(request_data[0], [None, None, [[["参考图视频"]]]])
+        self.assertEqual(request_data[1], [[None, "reference-media"]])
+
     async def test_generate_video_text_normalizes_media_only_create_response(self):
         operation_id = "11111111-1111-1111-1111-111111111111"
         project_id = "22222222-2222-2222-2222-222222222222"
@@ -399,7 +416,7 @@ class RouteNormalizationTests(unittest.IsolatedAsyncioTestCase):
         rpc = self.client._call_flow_frontend_rpc.await_args.kwargs
         self.assertEqual(rpc["rpc_id"], "nprQif")
         request_data = rpc["argument"][0][0]
-        self.assertEqual(request_data[0], [[["变身猫猫"]]])
+        self.assertEqual(request_data[0], [None, None, [[["变身猫猫"]]]])
         self.assertEqual(request_data[1], "veo_3_1_interpolation_lite")
         self.assertEqual(request_data[2], 1)
         self.assertEqual(request_data[4][1], "start-media")

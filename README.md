@@ -48,10 +48,10 @@
 - Docker 和 Docker Compose（推荐）
 - 或 Python 3.8+
 
-- 由于Flow增加了额外的验证码，你可以自行选择使用浏览器打码或第三发打码：
-注册[YesCaptcha](https://yescaptcha.com/i/13Xd8K)并获取api key，将其填入系统配置页面```YesCaptcha API密钥```区域
-注册[CapSolver](https://dashboard.capsolver.com/passport/register?inviteCode=z95yVf1HvixI)并获取api key，将其填入系统配置页面```CapSolver API密钥```区域
-注册[Captcha.run](https://captcha.run/sso?inviter=36179602-dbd1-4227-8ec8-98f8c0170c59)并获取api key，将其填入系统配置页面```Captcha.run API密钥```区域
+- 由于 Flow 增加了额外的验证码，你可以自行选择使用浏览器打码或第三方打码：
+  - 注册 [YesCaptcha](https://yescaptcha.com/i/13Xd8K) 并获取 API Key，填入系统配置页面的 `YesCaptcha API 密钥`。
+  - 注册 [CapSolver](https://dashboard.capsolver.com/passport/register?inviteCode=z95yVf1HvixI) 并获取 API Key，填入系统配置页面的 `CapSolver API 密钥`。
+  - 注册 [Captcha.run](https://captcha.run/sso?inviter=36179602-dbd1-4227-8ec8-98f8c0170c59) 并获取 API Key，填入系统配置页面的 `Captcha.run API 密钥`。
 - YesCaptcha 支持在管理页切换 `type`：`RecaptchaV3TaskProxyless`、`RecaptchaV3TaskProxylessM1`、`RecaptchaV3TaskProxylessM1S7`、`RecaptchaV3TaskProxylessM1S9`；当前默认推荐 `M1S9`，S7/S9 会强制提交 `minScore` 0.7/0.9。
 - 默认 `docker-compose.yml` 建议搭配第三方打码（yescaptcha/captcharun/capmonster/ezcaptcha/capsolver）。
 如需 Docker 内有头打码（browser/personal），请使用下方 `docker-compose.headed.yml`。
@@ -155,40 +155,25 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 
 ### 图片生成
 
-| 模型名称 | 说明| 尺寸 |
-|---------|--------|--------|
-| `gemini-3.0-pro-image-landscape` | 图/文生图 | 横屏 |
-| `gemini-3.0-pro-image-portrait` | 图/文生图 | 竖屏 |
-| `gemini-3.0-pro-image-square` | 图/文生图 | 方图 |
-| `gemini-3.0-pro-image-four-three` | 图/文生图 | 横屏 4:3 |
-| `gemini-3.0-pro-image-three-four` | 图/文生图 | 竖屏 3:4 |
-| `gemini-3.0-pro-image-landscape-2k` | 图/文生图(2K) | 横屏 |
-| `gemini-3.0-pro-image-portrait-2k` | 图/文生图(2K) | 竖屏 |
-| `gemini-3.0-pro-image-square-2k` | 图/文生图(2K) | 方图 |
-| `gemini-3.0-pro-image-four-three-2k` | 图/文生图(2K) | 横屏 4:3 |
-| `gemini-3.0-pro-image-three-four-2k` | 图/文生图(2K) | 竖屏 3:4 |
-| `gemini-3.0-pro-image-landscape-4k` | 图/文生图(4K) | 横屏 |
-| `gemini-3.0-pro-image-portrait-4k` | 图/文生图(4K) | 竖屏 |
-| `gemini-3.0-pro-image-square-4k` | 图/文生图(4K) | 方图 |
-| `gemini-3.0-pro-image-four-three-4k` | 图/文生图(4K) | 横屏 4:3 |
-| `gemini-3.0-pro-image-three-four-4k` | 图/文生图(4K) | 竖屏 3:4 |
-| `imagen-4.0-generate-preview-landscape` | 图/文生图 | 横屏 |
-| `imagen-4.0-generate-preview-portrait` | 图/文生图 | 竖屏 |
-| `gemini-3.1-flash-image-landscape` | 图/文生图 | 横屏 |
-| `gemini-3.1-flash-image-portrait` | 图/文生图 | 竖屏 |
-| `gemini-3.1-flash-image-square` | 图/文生图 | 方图 |
-| `gemini-3.1-flash-image-four-three` | 图/文生图 | 横屏 4:3 |
-| `gemini-3.1-flash-image-three-four` | 图/文生图 | 竖屏 3:4 |
-| `gemini-3.1-flash-image-landscape-2k` | 图/文生图(2K) | 横屏 |
-| `gemini-3.1-flash-image-portrait-2k` | 图/文生图(2K) | 竖屏 |
-| `gemini-3.1-flash-image-square-2k` | 图/文生图(2K) | 方图 |
-| `gemini-3.1-flash-image-four-three-2k` | 图/文生图(2K) | 横屏 4:3 |
-| `gemini-3.1-flash-image-three-four-2k` | 图/文生图(2K) | 竖屏 3:4 |
-| `gemini-3.1-flash-image-landscape-4k` | 图/文生图(4K) | 横屏 |
-| `gemini-3.1-flash-image-portrait-4k` | 图/文生图(4K) | 竖屏 |
-| `gemini-3.1-flash-image-square-4k` | 图/文生图(4K) | 方图 |
-| `gemini-3.1-flash-image-four-three-4k` | 图/文生图(4K) | 横屏 4:3 |
-| `gemini-3.1-flash-image-three-four-4k` | 图/文生图(4K) | 竖屏 3:4 |
+当前 `/v1/models` 与 Gemini `/models` 公开以下 15 个图片模型。旧图片名称继续兼容，但不再出现在模型列表中。
+
+| 当前公开名称 | 分辨率 | 比例 |
+|---|---:|---:|
+| `gemini-3.1-flash-image-landscape` | 默认 | 横屏 |
+| `gemini-3.1-flash-image-portrait` | 默认 | 竖屏 |
+| `gemini-3.1-flash-image-square` | 默认 | 方图 |
+| `gemini-3.1-flash-image-four-three` | 默认 | 横屏 4:3 |
+| `gemini-3.1-flash-image-three-four` | 默认 | 竖屏 3:4 |
+| `gemini-3.1-flash-image-landscape-2k` | 2K | 横屏 |
+| `gemini-3.1-flash-image-portrait-2k` | 2K | 竖屏 |
+| `gemini-3.1-flash-image-square-2k` | 2K | 方图 |
+| `gemini-3.1-flash-image-four-three-2k` | 2K | 横屏 4:3 |
+| `gemini-3.1-flash-image-three-four-2k` | 2K | 竖屏 3:4 |
+| `gemini-3.1-flash-image-landscape-4k` | 4K | 横屏 |
+| `gemini-3.1-flash-image-portrait-4k` | 4K | 竖屏 |
+| `gemini-3.1-flash-image-square-4k` | 4K | 方图 |
+| `gemini-3.1-flash-image-four-three-4k` | 4K | 横屏 4:3 |
+| `gemini-3.1-flash-image-three-four-4k` | 4K | 竖屏 3:4 |
 
 ### 视频生成
 
@@ -197,13 +182,47 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 | 当前公开名称 | 上游模型族 | 能力 |
 |---|---|---|
 | `veo-3.1-lite` / `veo-3.1-fast` / `veo-3.1-quality` / `omni-1.1-flash` | 当前默认模型 | 8 秒横屏文生视频 |
-| `veo-3.1-lite-{4|6|8}s-{landscape|portrait}` | Veo 3.1 - Lite | 文生视频 |
-| `veo-3.1-fast-{4|6|8}s-{landscape|portrait}` | Veo 3.1 - Fast | 文生视频 |
-| `veo-3.1-quality-{4|6|8}s-{landscape|portrait}` | Veo 3.1 - Quality | 文生视频 |
-| `omni-1.1-flash-{4|6|8|10}s-{landscape|portrait}` | Omni 1.1 Flash (`abra`) | 文生/参考图视频 |
-| `veo-3.1-{lite|fast|quality}-i2v-{4|6}s-{landscape|portrait}` | Veo 3.1 | 首帧/首尾帧视频 |
-| `veo-3.1-{lite|fast}-r2v-8s-{landscape|portrait}` | Veo 3.1 | 多参考图视频 |
-| `veo-3.1-{lite|fast|quality}-extend-8s-{landscape|portrait}` | Veo 3.1 | 视频续写 |
+| `veo-3.1-lite-{4,6,8}s-{landscape,portrait}` | Veo 3.1 - Lite | 文生视频 |
+| `veo-3.1-fast-{4,6,8}s-{landscape,portrait}` | Veo 3.1 - Fast | 文生视频 |
+| `veo-3.1-quality-{4,6,8}s-{landscape,portrait}` | Veo 3.1 - Quality | 文生视频 |
+| `omni-1.1-flash-{4,6,8,10}s-{landscape,portrait}` | Omni 1.1 Flash (`abra`) | 文生/参考图视频 |
+| `veo-3.1-{lite,fast,quality}-i2v-{4,6}s-{landscape,portrait}` | Veo 3.1 | 首帧/首尾帧视频 |
+| `veo-3.1-{lite,fast}-r2v-8s-{landscape,portrait}` | Veo 3.1 | 多参考图视频 |
+| `veo-3.1-{lite,fast,quality}-extend-8s-{landscape,portrait}` | Veo 3.1 | 视频续写 |
+
+表格中的花括号表示任选其中一个值。例如 `veo-3.1-fast-{4,6,8}s-{landscape,portrait}` 包含 4/6/8 秒与横屏/竖屏组合。
+
+#### Omni 1.1 Flash
+
+`Omni 1.1 Flash` 同时支持文生视频和参考图视频。调用方使用同一组模型名，服务会根据请求中是否包含图片自动选择生成模式：
+
+- `omni-1.1-flash` 是 `omni-1.1-flash-8s-landscape` 的默认别名。
+- 完整模型名为 `omni-1.1-flash-{4,6,8,10}s-{landscape,portrait}`，可选择 4、6、8、10 秒以及横屏或竖屏。
+- 仅传入文本时使用文生视频模式；传入 1–3 张 `image_url` 图片时使用参考图视频模式。
+- 时长和画面方向由模型名指定，无需额外传入同名参数。
+
+参考图视频请求示例：
+
+```json
+{
+  "model": "omni-1.1-flash-8s-landscape",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "让画面中的人物自然转身并看向镜头" },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/jpeg;base64,<参考图base64>"
+          }
+        }
+      ]
+    }
+  ],
+  "stream": true
+}
+```
 
 #### 兼容旧名：文生视频 (T2V - Text to Video)
 ⚠️ **不支持上传图片**
@@ -569,14 +588,6 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 ---
 
 **⭐ 如果这个项目对你有帮助，请给个 Star！**
-
-## 最近更新
-
-- `9f1d712` 同步 personal 打码逻辑，包含清理、浏览器参数和打码方式配置。
-- `da2ad06` 合并 PR #133。
-- `abd0c00` 修复 PR #133 合并后的集成问题。
-- `55431c9` 将 origin/main 同步到 PR #133。
-- `4b7a0ad` 新增 Prometheus 服务指标和 Token 健康监控。
 
 ## Star History
 
