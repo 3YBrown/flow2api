@@ -82,9 +82,9 @@
                 <div class="flex items-center justify-between gap-4 p-4 border-b border-border">
                     <h3 class="text-lg font-semibold">Token 列表</h3>
                     <div class="flex items-center gap-3">
-                        <!-- 自动刷新AT标签和开关 -->
+                        <!-- 登录态自动校验开关 -->
                         <div class="flex items-center gap-2">
-                            <span class="text-xs text-muted-foreground">自动刷新AT</span>
+                            <span class="text-xs text-muted-foreground">自动校验登录态</span>
                             <div class="relative inline-flex items-center group">
                                 <label class="inline-flex items-center cursor-pointer">
                                     <input type="checkbox" id="atAutoRefreshToggle" onchange="toggleATAutoRefresh()" class="sr-only peer">
@@ -92,7 +92,7 @@
                                 </label>
                                 <!-- 悬浮提示 -->
                                 <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                                    Token距离过期<1h时自动使用ST刷新AT
+                                    定时验证 Google Cookie 并更新账号凭证
                                     <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
                                 </div>
                             </div>
@@ -102,7 +102,7 @@
                                 <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                             </svg>
                         </button>
-                        <button onclick="exportTokens()" class="inline-flex items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 h-8 px-3" title="导出所有Token">
+                        <button onclick="exportTokens()" class="inline-flex items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 h-8 px-3" title="导出所有账号">
                             <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                 <polyline points="7 10 12 15 17 10"/>
@@ -110,7 +110,7 @@
                             </svg>
                             <span class="text-sm font-medium">导出</span>
                         </button>
-                        <button onclick="openImportModal()" class="inline-flex items-center justify-center rounded-md bg-green-600 text-white hover:bg-green-700 h-8 px-3" title="导入Token">
+                        <button onclick="openImportModal()" class="inline-flex items-center justify-center rounded-md bg-green-600 text-white hover:bg-green-700 h-8 px-3" title="导入账号">
                             <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                 <polyline points="17 8 12 3 7 8"/>
@@ -674,7 +674,7 @@
     <div id="addModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-background rounded-lg border border-border w-full max-w-2xl shadow-xl my-auto">
             <div class="flex items-center justify-between p-5 border-b border-border sticky top-0 bg-background">
-                <h3 class="text-lg font-semibold">添加 Token</h3>
+                <h3 class="text-lg font-semibold">添加账号</h3>
                 <button onclick="closeAddModal()" class="text-muted-foreground hover:text-foreground">
                     <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -683,11 +683,16 @@
                 </button>
             </div>
             <div class="p-5 space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-                <!-- Session Token -->
+                <!-- Current Flow credentials -->
                 <div class="space-y-2">
-                    <label class="text-sm font-medium">Session Token (ST) <span class="text-red-500">*</span></label>
-                    <textarea id="addTokenST" rows="3" class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-none" placeholder="请输入 Session Token" required></textarea>
-                    <p class="text-xs text-muted-foreground">从浏览器 Cookie 中获取 __Secure-next-auth.session-token，保存时将自动转换为 Access Token</p>
+                    <label class="text-sm font-medium">Google Cookies <span class="text-red-500">*</span></label>
+                    <textarea id="addTokenGoogleCookies" rows="5" class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y" placeholder="支持 JSON 导出或 name=value; name2=value2" required></textarea>
+                    <p class="text-xs text-muted-foreground">填写当前 flow.google.com 和 Google 账号域的登录 Cookie</p>
+                </div>
+                <div class="space-y-2">
+                    <label class="text-sm font-medium">Google 账号 <span class="text-red-500">*</span></label>
+                    <input id="addTokenLoginAccount" type="email" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="name@gmail.com" required>
+                    <p class="text-xs text-muted-foreground">用于稳定识别账号并接收浏览器扩展后续推送</p>
                 </div>
 
                 <!-- Remark -->
@@ -717,36 +722,17 @@
                 </div>
 
                 <div class="space-y-4 pt-2 border-t border-border">
-                    <label class="text-sm font-medium">协议登录与 ST 自动刷新</label>
+                    <label class="text-sm font-medium">登录态维护</label>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="space-y-2">
-                            <label class="text-sm font-medium">刷新模式</label>
-                            <select id="addTokenProtocolMode" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                                <option value="session">Session Token</option>
-                                <option value="protocol">协议登录</option>
-                            </select>
-                        </div>
-                        <div class="space-y-2">
+                        <div class="space-y-2 md:col-span-2">
                             <label class="text-sm font-medium">协议代理 <span class="text-muted-foreground text-xs">- 可选</span></label>
                             <input id="addTokenProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="例如 http://user:pass@host:port">
-                        </div>
-                        <div class="space-y-2 md:col-span-2">
-                            <label class="text-sm font-medium">Google Cookies <span class="text-muted-foreground text-xs">- 协议模式使用</span></label>
-                            <textarea id="addTokenGoogleCookies" rows="4" class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y" placeholder="支持 JSON 导出或 name=value; name2=value2"></textarea>
-                        </div>
-                        <div class="space-y-2">
-                            <label class="text-sm font-medium">登录账号 <span class="text-muted-foreground text-xs">- 可选</span></label>
-                            <input id="addTokenLoginAccount" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="name@gmail.com">
-                        </div>
-                        <div class="space-y-2">
-                            <label class="text-sm font-medium">登录密码 <span class="text-muted-foreground text-xs">- 仅存档</span></label>
-                            <input id="addTokenLoginPassword" type="password" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="可留空">
                         </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-3">
                         <label class="inline-flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" id="addTokenAutoRefreshEnabled" checked class="h-4 w-4 rounded border-input">
-                            <span class="text-sm font-medium">启用协议 ST 自动刷新</span>
+                            <span class="text-sm font-medium">启用登录态定时校验</span>
                         </label>
                         <div class="flex items-center gap-2">
                             <span class="text-sm text-muted-foreground">刷新间隔</span>
@@ -796,7 +782,7 @@
     <div id="editModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-background rounded-lg border border-border w-full max-w-2xl shadow-xl my-auto">
             <div class="flex items-center justify-between p-5 border-b border-border sticky top-0 bg-background">
-                <h3 class="text-lg font-semibold">编辑 Token</h3>
+                <h3 class="text-lg font-semibold">账号详情</h3>
                 <button onclick="closeEditModal()" class="text-muted-foreground hover:text-foreground">
                     <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -807,11 +793,15 @@
             <div class="p-5 space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
                 <input type="hidden" id="editTokenId">
 
-                <!-- Session Token -->
+                <!-- Current Flow credentials -->
                 <div class="space-y-2">
-                    <label class="text-sm font-medium">Session Token (ST) <span class="text-red-500">*</span></label>
-                    <textarea id="editTokenST" rows="3" class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-none" placeholder="请输入 Session Token" required></textarea>
-                    <p class="text-xs text-muted-foreground">从浏览器 Cookie 中获取 __Secure-next-auth.session-token，保存时将自动转换为 Access Token</p>
+                    <label class="text-sm font-medium">Google Cookies <span class="text-red-500">*</span></label>
+                    <textarea id="editTokenGoogleCookies" rows="5" class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y" placeholder="支持 JSON 导出或 name=value; name2=value2" required></textarea>
+                    <p class="text-xs text-muted-foreground">更新后会立即验证当前 Flow 登录态</p>
+                </div>
+                <div class="space-y-2">
+                    <label class="text-sm font-medium">Google 账号 <span class="text-red-500">*</span></label>
+                    <input id="editTokenLoginAccount" type="email" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="name@gmail.com" required>
                 </div>
 
                 <!-- Remark -->
@@ -841,36 +831,17 @@
                 </div>
 
                 <div class="space-y-4 pt-2 border-t border-border">
-                    <label class="text-sm font-medium">协议登录与 ST 自动刷新</label>
+                    <label class="text-sm font-medium">登录态维护</label>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="space-y-2">
-                            <label class="text-sm font-medium">刷新模式</label>
-                            <select id="editTokenProtocolMode" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                                <option value="session">Session Token</option>
-                                <option value="protocol">协议登录</option>
-                            </select>
-                        </div>
-                        <div class="space-y-2">
+                        <div class="space-y-2 md:col-span-2">
                             <label class="text-sm font-medium">协议代理 <span class="text-muted-foreground text-xs">- 可选</span></label>
                             <input id="editTokenProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="例如 http://user:pass@host:port">
-                        </div>
-                        <div class="space-y-2 md:col-span-2">
-                            <label class="text-sm font-medium">Google Cookies <span class="text-muted-foreground text-xs">- 协议模式使用</span></label>
-                            <textarea id="editTokenGoogleCookies" rows="4" class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y" placeholder="支持 JSON 导出或 name=value; name2=value2"></textarea>
-                        </div>
-                        <div class="space-y-2">
-                            <label class="text-sm font-medium">登录账号 <span class="text-muted-foreground text-xs">- 可选</span></label>
-                            <input id="editTokenLoginAccount" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="name@gmail.com">
-                        </div>
-                        <div class="space-y-2">
-                            <label class="text-sm font-medium">登录密码 <span class="text-muted-foreground text-xs">- 仅存档</span></label>
-                            <input id="editTokenLoginPassword" type="password" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="留空则不修改">
                         </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-3">
                         <label class="inline-flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" id="editTokenAutoRefreshEnabled" class="h-4 w-4 rounded border-input">
-                            <span class="text-sm font-medium">启用协议 ST 自动刷新</span>
+                            <span class="text-sm font-medium">启用登录态定时校验</span>
                         </label>
                         <div class="flex items-center gap-2">
                             <span class="text-sm text-muted-foreground">刷新间隔</span>
@@ -916,11 +887,11 @@
         </div>
     </div>
 
-    <!-- Token 导入模态框 -->
+    <!-- 账号导入模态框 -->
     <div id="importModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
         <div class="bg-background rounded-lg border border-border w-full max-w-md shadow-xl">
             <div class="flex items-center justify-between p-5 border-b border-border">
-                <h3 class="text-lg font-semibold">导入 Token</h3>
+                <h3 class="text-lg font-semibold">导入账号</h3>
                 <button onclick="closeImportModal()" class="text-muted-foreground hover:text-foreground">
                     <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -932,13 +903,14 @@
                 <div>
                     <label class="text-sm font-medium mb-2 block">选择 JSON 文件</label>
                     <input type="file" id="importFile" accept=".json" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                    <p class="text-xs text-muted-foreground mt-1">选择导出的 Token JSON 文件进行导入</p>
+                    <p class="text-xs text-muted-foreground mt-1">选择本系统导出的账号 JSON 文件，单次最多 100 个账号</p>
                 </div>
                 <div class="rounded-md bg-blue-50 dark:bg-blue-900/20 p-3 border border-blue-200 dark:border-blue-800">
                     <p class="text-xs text-blue-800 dark:text-blue-200">
-                        <strong>说明：</strong>如果邮箱存在则会覆盖更新，不存在则会新增
+                        <strong>格式：</strong>每项必须包含 login_account 和 google_cookies；同一账号会更新，其余账号会新增。旧版 access_token 和 session_token 格式不再支持。
                     </p>
                 </div>
+                <p class="text-xs text-amber-700 dark:text-amber-300">导出文件包含可直接登录 Flow 的 Cookie，请仅在可信设备上保存和导入。</p>
             </div>
             <div class="flex items-center justify-end gap-3 p-5 border-t border-border">
                 <button onclick="closeImportModal()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-5">取消</button>
@@ -967,19 +939,17 @@
         formatAccountType=(tier)=>{if(tier==='PAYGATE_TIER_NOT_PAID'||!tier){return`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-gray-100 text-gray-700">Free</span>`}if(tier==='PAYGATE_TIER_ONE'){return`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-blue-50 text-blue-700">Pro</span>`}if(tier==='PAYGATE_TIER_TWO'){return`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-purple-50 text-purple-700">Ult</span>`}return`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-amber-50 text-amber-700" title="${tier}">${tier}</span>`},
         formatProjectNameDisplay=name=>{if(!name)return'<span class="text-muted-foreground">-</span>';const text=String(name);const match=text.match(/^(.*?)(?:\s+(P\d+))$/);if(match){return`<div class="flex flex-col items-center justify-center gap-1 leading-none"><span class="text-xs font-medium text-foreground whitespace-nowrap">${escapeLogHtml(match[1])}</span><span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">${escapeLogHtml(match[2])}</span></div>`}return`<div class="text-center text-xs font-medium text-foreground whitespace-nowrap">${escapeLogHtml(text)}</div>`},
         formatProjectIdDisplay=projectId=>{if(!projectId)return'<span class="text-muted-foreground">-</span>';const text=String(projectId);const short=text.length>8?`${text.substring(0,8)}...`:text;return`<button onclick="copyProjectId('${projectId}')" class="inline-flex items-center justify-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-mono font-medium text-blue-700 transition-colors hover:bg-blue-100 hover:text-blue-800" title="点击复制项目ID&#10;${escapeLogHtml(text)}">${escapeLogHtml(short)}</button>`},
-        renderTokenActions=t=>{const toggleLabel=t.is_active?'禁用':'启用';return`<div class="inline-flex flex-nowrap items-center justify-end gap-1"><button onclick="refreshTokenAT(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-blue-50 hover:text-blue-700">刷新AT</button><button onclick="openEditModal(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-green-50 hover:text-green-700">详情</button><button onclick="toggleToken(${t.id},${t.is_active})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-accent">${toggleLabel}</button><button onclick="deleteToken(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-destructive/10 hover:text-destructive">删除</button></div>`},
+        renderTokenActions=t=>{const toggleLabel=t.is_active?'禁用':'启用';return`<div class="inline-flex flex-nowrap items-center justify-end gap-1"><button onclick="refreshTokenAT(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-blue-50 hover:text-blue-700">刷新凭证</button><button onclick="openEditModal(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-green-50 hover:text-green-700">详情</button><button onclick="toggleToken(${t.id},${t.is_active})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-accent">${toggleLabel}</button><button onclick="deleteToken(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-destructive/10 hover:text-destructive">删除</button></div>`},
         renderTokens=()=>{const tb=$('tokenTableBody');tb.innerHTML=allTokens.map(t=>{const imageDisplay=t.image_enabled?`${t.image_count||0}`:'-';const videoDisplay=t.video_enabled?`${t.video_count||0}`:'-';const creditsDisplay=t.credits!==undefined?`${t.credits}`:'-';const accountTypeDisplay=formatAccountType(t.user_paygate_tier);const projectIdDisplay=formatProjectIdDisplay(t.current_project_id);const expiryDisplay=formatExpiry(t.at_expires);const protocolDisplay=t.protocol_mode==='protocol'?`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700" title="${escapeLogHtml(t.last_st_refresh_result||'')}">协议</span>`:`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-gray-100 text-gray-700">ST</span>`;const tokenActions=renderTokenActions(t);return`<tr class="hover:bg-muted/20 transition-colors"><td class="py-3 px-2.5 align-middle"><div class="max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium text-foreground" title="${escapeLogHtml(t.email||'')}">${escapeLogHtml(t.email||'-')}</div></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><span class="inline-flex items-center rounded px-2 py-0.5 text-xs ${t.is_active?'bg-green-50 text-green-700':'bg-gray-100 text-gray-700'}">${t.is_active?'启用':'禁用'}</span></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap">${protocolDisplay}</td><td class="py-3 px-2.5 text-center text-xs align-middle whitespace-nowrap">${expiryDisplay}</td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><button onclick="refreshTokenCredits(${t.id})" class="inline-flex items-center justify-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 hover:text-blue-800" title="点击刷新余额"><span>${creditsDisplay}</span><svg class="h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/><path d="M15 4.5l3.5 3.5L22 4.5"/></svg></button></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap">${accountTypeDisplay}</td><td class="py-3 px-2.5 text-center text-xs align-middle whitespace-nowrap">${projectIdDisplay}</td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><span class="text-sm font-medium">${imageDisplay}</span></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><span class="text-sm font-medium">${videoDisplay}</span></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><span class="text-sm font-medium ${Number(t.error_count||0)>0?'text-red-600':'text-foreground'}">${t.error_count||0}</span></td><td class="py-3 px-2.5 text-right align-middle whitespace-nowrap">${tokenActions}</td></tr>`}).join('')},
         refreshTokenCredits=async(id)=>{try{showToast('正在刷新余额...','info');const r=await apiRequest(`/api/tokens/${id}/refresh-credits`,{method:'POST'});if(!r)return;const d=await r.json();if(d.success){showToast(`余额刷新成功: ${d.credits}`,'success');await refreshTokens()}else{showToast('刷新余额失败: '+(d.detail||'未知错误'),'error')}}catch(e){showToast('刷新余额失败: '+e.message,'error')}},
         refreshTokenAT=async(id)=>{try{showToast('正在更新AT...','info');const r=await apiRequest(`/api/tokens/${id}/refresh-at`,{method:'POST'});if(!r)return;const d=await r.json();if(d.success){const expiresDate=d.token.at_expires?new Date(d.token.at_expires):null;const expiresStr=expiresDate?expiresDate.toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\//g,'-'):'未知';showToast(`AT更新成功! 新过期时间: ${expiresStr}`,'success');await refreshTokens()}else{showToast('更新失败: '+(d.detail||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}},
         refreshTokens=async()=>{await loadTokens();await loadStats()},
         openAddModal=()=>$('addModal').classList.remove('hidden'),
-        closeAddModal=()=>{$('addModal').classList.add('hidden');$('addTokenST').value='';$('addTokenRemark').value='';$('addTokenProjectId').value='';$('addTokenProjectName').value='';$('addTokenCaptchaProxyUrl').value='';$('addTokenProtocolMode').value='session';$('addTokenGoogleCookies').value='';$('addTokenLoginAccount').value='';$('addTokenLoginPassword').value='';$('addTokenProxyUrl').value='';$('addTokenAutoRefreshEnabled').checked=true;$('addTokenRefreshIntervalMinutes').value='120';$('addTokenImageEnabled').checked=true;$('addTokenVideoEnabled').checked=true;$('addTokenImageConcurrency').value='-1';$('addTokenVideoConcurrency').value='-1'},
-        openEditModal=(id)=>{const token=allTokens.find(t=>t.id===id);if(!token)return showToast('Token不存在','error');$('editTokenId').value=token.id;$('editTokenST').value=token.st||'';$('editTokenRemark').value=token.remark||'';$('editTokenProjectId').value=token.current_project_id||'';$('editTokenProjectName').value=token.current_project_name||'';$('editTokenCaptchaProxyUrl').value=token.captcha_proxy_url||'';$('editTokenProtocolMode').value=token.protocol_mode||'session';$('editTokenGoogleCookies').value=token.google_cookies||'';$('editTokenLoginAccount').value=token.login_account||'';$('editTokenLoginPassword').value='';$('editTokenProxyUrl').value=token.proxy_url||'';$('editTokenAutoRefreshEnabled').checked=token.auto_refresh_enabled!==false;$('editTokenRefreshIntervalMinutes').value=token.refresh_interval_minutes||120;$('editTokenImageEnabled').checked=token.image_enabled!==false;$('editTokenVideoEnabled').checked=token.video_enabled!==false;$('editTokenImageConcurrency').value=token.image_concurrency||'-1';$('editTokenVideoConcurrency').value=token.video_concurrency||'-1';$('editModal').classList.remove('hidden')},
-        closeEditModal=()=>{$('editModal').classList.add('hidden');$('editTokenId').value='';$('editTokenST').value='';$('editTokenRemark').value='';$('editTokenProjectId').value='';$('editTokenProjectName').value='';$('editTokenCaptchaProxyUrl').value='';$('editTokenProtocolMode').value='session';$('editTokenGoogleCookies').value='';$('editTokenLoginAccount').value='';$('editTokenLoginPassword').value='';$('editTokenProxyUrl').value='';$('editTokenAutoRefreshEnabled').checked=true;$('editTokenRefreshIntervalMinutes').value='120';$('editTokenImageEnabled').checked=true;$('editTokenVideoEnabled').checked=true;$('editTokenImageConcurrency').value='';$('editTokenVideoConcurrency').value=''},
-        submitEditToken=async()=>{const id=parseInt($('editTokenId').value),st=$('editTokenST').value.trim(),remark=$('editTokenRemark').value.trim(),projectId=$('editTokenProjectId').value.trim(),projectName=$('editTokenProjectName').value.trim(),captchaProxyUrl=$('editTokenCaptchaProxyUrl').value.trim(),protocolMode=$('editTokenProtocolMode').value,googleCookies=$('editTokenGoogleCookies').value.trim(),loginAccount=$('editTokenLoginAccount').value.trim(),loginPassword=$('editTokenLoginPassword').value,proxyUrl=$('editTokenProxyUrl').value.trim(),autoRefreshEnabled=$('editTokenAutoRefreshEnabled').checked,refreshIntervalMinutes=parseInt($('editTokenRefreshIntervalMinutes').value)||120,imageEnabled=$('editTokenImageEnabled').checked,videoEnabled=$('editTokenVideoEnabled').checked,imageConcurrency=$('editTokenImageConcurrency').value?parseInt($('editTokenImageConcurrency').value):null,videoConcurrency=$('editTokenVideoConcurrency').value?parseInt($('editTokenVideoConcurrency').value):null;if(!id)return showToast('Token ID无效','error');if(!st)return showToast('请输入 Session Token','error');const btn=$('editTokenBtn'),btnText=$('editTokenBtnText'),btnSpinner=$('editTokenBtnSpinner');btn.disabled=true;btnText.textContent='保存中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest(`/api/tokens/${id}`,{method:'PUT',body:JSON.stringify({st:st,remark:remark||null,project_id:projectId||null,project_name:projectName||null,captcha_proxy_url:captchaProxyUrl,protocol_mode:protocolMode,google_cookies:googleCookies,login_account:loginAccount,login_password:loginPassword||null,proxy_url:proxyUrl,auto_refresh_enabled:autoRefreshEnabled,refresh_interval_minutes:refreshIntervalMinutes,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r){btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeEditModal();await refreshTokens();showToast('Token更新成功','success')}else{showToast('更新失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden')}},
-        convertST2AT=async()=>{const st=$('addTokenST').value.trim();if(!st)return showToast('请先输入 Session Token','error');try{showToast('正在转换 ST→AT...','info');const r=await apiRequest('/api/tokens/st2at',{method:'POST',body:JSON.stringify({st:st})});if(!r)return;const d=await r.json();if(d.success&&d.access_token){$('addTokenAT').value=d.access_token;showToast('转换成功！AT已自动填入','success')}else{showToast('转换失败: '+(d.message||d.detail||'未知错误'),'error')}}catch(e){showToast('转换失败: '+e.message,'error')}},
-        convertEditST2AT=async()=>{const st=$('editTokenST').value.trim();if(!st)return showToast('请先输入 Session Token','error');try{showToast('正在转换 ST→AT...','info');const r=await apiRequest('/api/tokens/st2at',{method:'POST',body:JSON.stringify({st:st})});if(!r)return;const d=await r.json();if(d.success&&d.access_token){$('editTokenAT').value=d.access_token;showToast('转换成功！AT已自动填入','success')}else{showToast('转换失败: '+(d.message||d.detail||'未知错误'),'error')}}catch(e){showToast('转换失败: '+e.message,'error')}},
-        submitAddToken=async()=>{const st=$('addTokenST').value.trim(),remark=$('addTokenRemark').value.trim(),projectId=$('addTokenProjectId').value.trim(),projectName=$('addTokenProjectName').value.trim(),captchaProxyUrl=$('addTokenCaptchaProxyUrl').value.trim(),protocolMode=$('addTokenProtocolMode').value,googleCookies=$('addTokenGoogleCookies').value.trim(),loginAccount=$('addTokenLoginAccount').value.trim(),loginPassword=$('addTokenLoginPassword').value,proxyUrl=$('addTokenProxyUrl').value.trim(),autoRefreshEnabled=$('addTokenAutoRefreshEnabled').checked,refreshIntervalMinutes=parseInt($('addTokenRefreshIntervalMinutes').value)||120,imageEnabled=$('addTokenImageEnabled').checked,videoEnabled=$('addTokenVideoEnabled').checked,imageConcurrency=parseInt($('addTokenImageConcurrency').value)||(-1),videoConcurrency=parseInt($('addTokenVideoConcurrency').value)||(-1);if(!st)return showToast('请输入 Session Token','error');const btn=$('addTokenBtn'),btnText=$('addTokenBtnText'),btnSpinner=$('addTokenBtnSpinner');btn.disabled=true;btnText.textContent='添加中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens',{method:'POST',body:JSON.stringify({st:st,remark:remark||null,project_id:projectId||null,project_name:projectName||null,captcha_proxy_url:captchaProxyUrl,protocol_mode:protocolMode,google_cookies:googleCookies,login_account:loginAccount,login_password:loginPassword,proxy_url:proxyUrl,auto_refresh_enabled:autoRefreshEnabled,refresh_interval_minutes:refreshIntervalMinutes,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r){btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeAddModal();await refreshTokens();showToast('Token添加成功','success')}else{showToast('添加失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('添加失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden')}},
+        closeAddModal=()=>{$('addModal').classList.add('hidden');$('addTokenGoogleCookies').value='';$('addTokenLoginAccount').value='';$('addTokenRemark').value='';$('addTokenProjectId').value='';$('addTokenProjectName').value='';$('addTokenCaptchaProxyUrl').value='';$('addTokenProxyUrl').value='';$('addTokenAutoRefreshEnabled').checked=true;$('addTokenRefreshIntervalMinutes').value='120';$('addTokenImageEnabled').checked=true;$('addTokenVideoEnabled').checked=true;$('addTokenImageConcurrency').value='-1';$('addTokenVideoConcurrency').value='-1'},
+        openEditModal=(id)=>{const token=allTokens.find(t=>t.id===id);if(!token)return showToast('账号不存在','error');$('editTokenId').value=token.id;$('editTokenGoogleCookies').value=token.google_cookies||'';$('editTokenLoginAccount').value=token.login_account||token.email||'';$('editTokenRemark').value=token.remark||'';$('editTokenProjectId').value=token.current_project_id||'';$('editTokenProjectName').value=token.current_project_name||'';$('editTokenCaptchaProxyUrl').value=token.captcha_proxy_url||'';$('editTokenProxyUrl').value=token.proxy_url||'';$('editTokenAutoRefreshEnabled').checked=token.auto_refresh_enabled!==false;$('editTokenRefreshIntervalMinutes').value=token.refresh_interval_minutes||120;$('editTokenImageEnabled').checked=token.image_enabled!==false;$('editTokenVideoEnabled').checked=token.video_enabled!==false;$('editTokenImageConcurrency').value=token.image_concurrency||'-1';$('editTokenVideoConcurrency').value=token.video_concurrency||'-1';$('editModal').classList.remove('hidden')},
+        closeEditModal=()=>{$('editModal').classList.add('hidden');$('editTokenId').value='';$('editTokenGoogleCookies').value='';$('editTokenLoginAccount').value='';$('editTokenRemark').value='';$('editTokenProjectId').value='';$('editTokenProjectName').value='';$('editTokenCaptchaProxyUrl').value='';$('editTokenProxyUrl').value='';$('editTokenAutoRefreshEnabled').checked=true;$('editTokenRefreshIntervalMinutes').value='120';$('editTokenImageEnabled').checked=true;$('editTokenVideoEnabled').checked=true;$('editTokenImageConcurrency').value='';$('editTokenVideoConcurrency').value=''},
+        submitEditToken=async()=>{const id=parseInt($('editTokenId').value),googleCookies=$('editTokenGoogleCookies').value.trim(),loginAccount=$('editTokenLoginAccount').value.trim().toLowerCase(),remark=$('editTokenRemark').value.trim(),projectId=$('editTokenProjectId').value.trim(),projectName=$('editTokenProjectName').value.trim(),captchaProxyUrl=$('editTokenCaptchaProxyUrl').value.trim(),proxyUrl=$('editTokenProxyUrl').value.trim(),autoRefreshEnabled=$('editTokenAutoRefreshEnabled').checked,refreshIntervalMinutes=parseInt($('editTokenRefreshIntervalMinutes').value)||120,imageEnabled=$('editTokenImageEnabled').checked,videoEnabled=$('editTokenVideoEnabled').checked,imageConcurrency=$('editTokenImageConcurrency').value?parseInt($('editTokenImageConcurrency').value):null,videoConcurrency=$('editTokenVideoConcurrency').value?parseInt($('editTokenVideoConcurrency').value):null;if(!id)return showToast('账号 ID 无效','error');if(!googleCookies)return showToast('请输入 Google Cookies','error');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginAccount))return showToast('请输入有效的 Google 账号邮箱','error');const btn=$('editTokenBtn'),btnText=$('editTokenBtnText'),btnSpinner=$('editTokenBtnSpinner');btn.disabled=true;btnText.textContent='保存中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest(`/api/tokens/${id}`,{method:'PUT',body:JSON.stringify({remark:remark||null,project_id:projectId||null,project_name:projectName||null,captcha_proxy_url:captchaProxyUrl,protocol_mode:'protocol',google_cookies:googleCookies,login_account:loginAccount,proxy_url:proxyUrl,auto_refresh_enabled:autoRefreshEnabled,refresh_interval_minutes:refreshIntervalMinutes,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r)return;const d=await r.json();if(d.success){closeEditModal();await refreshTokens();showToast('账号更新成功','success')}else{showToast('更新失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden')}},
+        submitAddToken=async()=>{const googleCookies=$('addTokenGoogleCookies').value.trim(),loginAccount=$('addTokenLoginAccount').value.trim().toLowerCase(),remark=$('addTokenRemark').value.trim(),projectId=$('addTokenProjectId').value.trim(),projectName=$('addTokenProjectName').value.trim(),captchaProxyUrl=$('addTokenCaptchaProxyUrl').value.trim(),proxyUrl=$('addTokenProxyUrl').value.trim(),autoRefreshEnabled=$('addTokenAutoRefreshEnabled').checked,refreshIntervalMinutes=parseInt($('addTokenRefreshIntervalMinutes').value)||120,imageEnabled=$('addTokenImageEnabled').checked,videoEnabled=$('addTokenVideoEnabled').checked,imageConcurrency=parseInt($('addTokenImageConcurrency').value)||(-1),videoConcurrency=parseInt($('addTokenVideoConcurrency').value)||(-1);if(!googleCookies)return showToast('请输入 Google Cookies','error');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginAccount))return showToast('请输入有效的 Google 账号邮箱','error');const btn=$('addTokenBtn'),btnText=$('addTokenBtnText'),btnSpinner=$('addTokenBtnSpinner');btn.disabled=true;btnText.textContent='添加中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens',{method:'POST',body:JSON.stringify({remark:remark||null,project_id:projectId||null,project_name:projectName||null,captcha_proxy_url:captchaProxyUrl,protocol_mode:'protocol',google_cookies:googleCookies,login_account:loginAccount,proxy_url:proxyUrl,auto_refresh_enabled:autoRefreshEnabled,refresh_interval_minutes:refreshIntervalMinutes,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r)return;const d=await r.json();if(d.success){closeAddModal();await refreshTokens();showToast('账号添加成功','success')}else{showToast('添加失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('添加失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden')}},
         testToken=async(id)=>{try{showToast('正在测试Token...','info');const r=await apiRequest(`/api/tokens/${id}/test`,{method:'POST'});if(!r)return;const d=await r.json();if(d.success&&d.status==='success'){let msg=`Token有效！用户: ${d.email||'未知'}`;if(d.sora2_supported){const remaining=d.sora2_total_count-d.sora2_redeemed_count;msg+=`\nSora2: 支持 (${remaining}/${d.sora2_total_count})`;if(d.sora2_remaining_count!==undefined){msg+=`\n可用次数: ${d.sora2_remaining_count}`}}showToast(msg,'success');await refreshTokens()}else{showToast(`Token无效: ${d.message||'未知错误'}`,'error')}}catch(e){showToast('测试失败: '+e.message,'error')}},
         toggleToken=async(id,isActive)=>{const action=isActive?'disable':'enable';try{const r=await apiRequest(`/api/tokens/${id}/${action}`,{method:'POST'});if(!r)return;const d=await r.json();d.success?(await refreshTokens(),showToast(isActive?'Token已禁用':'Token已启用','success')):showToast('操作失败','error')}catch(e){showToast('操作失败: '+e.message,'error')}},
         toggleTokenStatus=async(id,active)=>{try{const r=await apiRequest(`/api/tokens/${id}/status`,{method:'PUT',body:JSON.stringify({is_active:active})});if(!r)return;const d=await r.json();d.success?(await refreshTokens(),showToast('状态更新成功','success')):showToast('更新失败','error')}catch(e){showToast('更新失败: '+e.message,'error')}},
@@ -990,8 +960,8 @@
         closeSora2Modal=()=>{$('sora2Modal').classList.add('hidden');$('sora2TokenId').value='';$('sora2InviteCode').value=''},
         openImportModal=()=>{$('importModal').classList.remove('hidden');$('importFile').value=''},
         closeImportModal=()=>{$('importModal').classList.add('hidden');$('importFile').value=''},
-        exportTokens=()=>{if(allTokens.length===0){showToast('没有Token可导出','error');return}const exportData=allTokens.map(t=>({email:t.email,access_token:t.token,session_token:t.st||null,is_active:t.is_active,captcha_proxy_url:t.captcha_proxy_url||'',image_enabled:t.image_enabled!==false,video_enabled:t.video_enabled!==false,image_concurrency:t.image_concurrency||(-1),video_concurrency:t.video_concurrency||(-1),protocol_mode:t.protocol_mode||'session',google_cookies:t.google_cookies||'',login_account:t.login_account||'',login_password:'',proxy_url:t.proxy_url||'',auto_refresh_enabled:t.auto_refresh_enabled!==false,refresh_interval_minutes:t.refresh_interval_minutes||120}));const dataStr=JSON.stringify(exportData,null,2);const dataBlob=new Blob([dataStr],{type:'application/json'});const url=URL.createObjectURL(dataBlob);const link=document.createElement('a');link.href=url;link.download=`tokens_${new Date().toISOString().split('T')[0]}.json`;document.body.appendChild(link);link.click();document.body.removeChild(link);URL.revokeObjectURL(url);showToast(`已导出 ${allTokens.length} 个Token`,'success')},
-        submitImportTokens=async()=>{const fileInput=$('importFile');if(!fileInput.files||fileInput.files.length===0){showToast('请选择文件','error');return}const file=fileInput.files[0];if(!file.name.endsWith('.json')){showToast('请选择JSON文件','error');return}try{const fileContent=await file.text();const importData=JSON.parse(fileContent);if(!Array.isArray(importData)){showToast('JSON格式错误：应为数组','error');return}if(importData.length===0){showToast('JSON文件为空','error');return}const btn=$('importBtn'),btnText=$('importBtnText'),btnSpinner=$('importBtnSpinner');btn.disabled=true;btnText.textContent='导入中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens/import',{method:'POST',body:JSON.stringify({tokens:importData})});if(!r){btn.disabled=false;btnText.textContent='导入';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeImportModal();await refreshTokens();const msg=`导入成功！新增: ${d.added||0}, 更新: ${d.updated||0}`;showToast(msg,'success')}else{showToast('导入失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('导入失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='导入';btnSpinner.classList.add('hidden')}}catch(e){showToast('文件解析失败: '+e.message,'error')}},
+        exportTokens=()=>{const exportable=allTokens.filter(t=>(t.login_account||t.email)&&t.google_cookies);if(exportable.length===0){showToast('没有可导出的新版账号','error');return}const exportData=exportable.map(t=>({login_account:(t.login_account||t.email).toLowerCase(),google_cookies:t.google_cookies,remark:t.remark||'',project_id:t.current_project_id||null,project_name:t.current_project_name||null,is_active:t.is_active!==false,captcha_proxy_url:t.captcha_proxy_url||'',extension_route_key:t.extension_route_key||'',image_enabled:t.image_enabled!==false,video_enabled:t.video_enabled!==false,image_concurrency:t.image_concurrency??(-1),video_concurrency:t.video_concurrency??(-1),protocol_mode:'protocol',proxy_url:t.proxy_url||'',auto_refresh_enabled:t.auto_refresh_enabled!==false,refresh_interval_minutes:t.refresh_interval_minutes||120}));const dataStr=JSON.stringify(exportData,null,2),dataBlob=new Blob([dataStr],{type:'application/json'}),url=URL.createObjectURL(dataBlob),link=document.createElement('a');link.href=url;link.download=`flow2api_accounts_${new Date().toISOString().split('T')[0]}.json`;document.body.appendChild(link);link.click();document.body.removeChild(link);URL.revokeObjectURL(url);const skipped=allTokens.length-exportable.length;showToast(`已导出 ${exportable.length} 个账号${skipped?`，跳过 ${skipped} 个缺少新版 Cookie 的旧账号`:''}`,'success')},
+        submitImportTokens=async()=>{const fileInput=$('importFile');if(!fileInput.files||fileInput.files.length===0)return showToast('请选择文件','error');const file=fileInput.files[0];if(!file.name.toLowerCase().endsWith('.json'))return showToast('请选择 JSON 文件','error');if(file.size>5*1024*1024)return showToast('导入文件不能超过 5MB','error');try{const fileContent=await file.text(),importData=JSON.parse(fileContent);if(!Array.isArray(importData))return showToast('JSON 格式错误：根节点必须是数组','error');if(importData.length===0)return showToast('JSON 文件为空','error');if(importData.length>100)return showToast('单次最多导入 100 个账号','error');const invalidIndex=importData.findIndex(item=>!item||typeof item!=='object'||Array.isArray(item)||typeof item.google_cookies!=='string'||!item.google_cookies.trim()||typeof item.login_account!=='string'||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.login_account.trim())||(item.protocol_mode&&item.protocol_mode!=='protocol'));if(invalidIndex>=0)return showToast(`第 ${invalidIndex+1} 项缺少有效的 login_account 或 google_cookies`,'error');const legacyIndex=importData.findIndex(item=>'access_token'in item||'session_token'in item||'login_password'in item);if(legacyIndex>=0)return showToast(`第 ${legacyIndex+1} 项仍包含旧版凭证字段，请使用新版导出文件`,'error');const normalized=importData.map(item=>({...item,login_account:item.login_account.trim().toLowerCase(),google_cookies:item.google_cookies.trim(),protocol_mode:'protocol'}));const btn=$('importBtn'),btnText=$('importBtnText'),btnSpinner=$('importBtnSpinner');btn.disabled=true;btnText.textContent='导入中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens/import',{method:'POST',body:JSON.stringify({tokens:normalized})});if(!r)return;const d=await r.json(),errorList=Array.isArray(d.errors)?d.errors:[];if(d.success){closeImportModal();await refreshTokens();let message=`导入完成：新增 ${d.added||0}，更新 ${d.updated||0}`;if(errorList.length)message+=`，失败 ${errorList.length}\n${errorList.slice(0,3).join('\n')}`;showToast(message,errorList.length?'error':'success')}else{const detail=Array.isArray(d.detail)?d.detail.map(item=>item.msg||String(item)).join('；'):(d.detail||d.message||errorList.join('\n')||'未知错误');showToast('导入失败: '+detail,'error')}}catch(e){showToast('导入失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='导入';btnSpinner.classList.add('hidden')}}catch(e){showToast('文件解析失败: '+e.message,'error')}},
         submitSora2Activate=async()=>{const tokenId=parseInt($('sora2TokenId').value),inviteCode=$('sora2InviteCode').value.trim();if(!tokenId)return showToast('Token ID无效','error');if(!inviteCode)return showToast('请输入邀请码','error');if(inviteCode.length!==6)return showToast('邀请码必须是6位','error');const btn=$('sora2ActivateBtn'),btnText=$('sora2ActivateBtnText'),btnSpinner=$('sora2ActivateBtnSpinner');btn.disabled=true;btnText.textContent='激活中...';btnSpinner.classList.remove('hidden');try{showToast('正在激活Sora2...','info');const r=await apiRequest(`/api/tokens/${tokenId}/sora2/activate?invite_code=${inviteCode}`,{method:'POST'});if(!r){btn.disabled=false;btnText.textContent='激活';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeSora2Modal();await refreshTokens();if(d.already_accepted){showToast('Sora2已激活（之前已接受）','success')}else{showToast(`Sora2激活成功！邀请码: ${d.invite_code||'无'}`,'success')}}else{showToast('激活失败: '+(d.message||'未知错误'),'error')}}catch(e){showToast('激活失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='激活';btnSpinner.classList.add('hidden')}},
         loadAdminConfig=async()=>{try{const r=await apiRequest('/api/admin/config');if(!r)return;const d=await r.json();$('cfgErrorBan').value=d.error_ban_threshold||3;$('cfgAdminUsername').value=d.admin_username||'admin';$('cfgCurrentAPIKey').value=d.api_key||'';$('cfgDebugEnabled').checked=d.debug_enabled||false}catch(e){console.error('加载配置失败:',e)}},
         saveAdminConfig=async()=>{try{const r=await apiRequest('/api/admin/config',{method:'POST',body:JSON.stringify({error_ban_threshold:parseInt($('cfgErrorBan').value)||3})});if(!r)return;const d=await r.json();d.success?showToast('配置保存成功','success'):showToast('保存失败','error')}catch(e){showToast('保存失败: '+e.message,'error')}},

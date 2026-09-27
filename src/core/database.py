@@ -1065,10 +1065,49 @@ class Database:
             print(f"?? request_logs?????: {e}")
             # Continue even if migration fails
 
+    async def _ensure_token_identity_available(
+        self,
+        db,
+        *,
+        email: Optional[str] = None,
+        login_account: Optional[str] = None,
+        exclude_token_id: Optional[int] = None,
+    ) -> None:
+        identities = sorted(
+            {
+                str(value or "").strip().lower()
+                for value in (email, login_account)
+                if str(value or "").strip()
+            }
+        )
+        if not identities:
+            return
+        clauses = []
+        params: List[Any] = []
+        for identity in identities:
+            clauses.append(
+                "(email = ? COLLATE NOCASE OR login_account = ? COLLATE NOCASE)"
+            )
+            params.extend((identity, identity))
+        query = "SELECT id FROM tokens WHERE (" + " OR ".join(clauses) + ")"
+        if exclude_token_id is not None:
+            query += " AND id != ?"
+            params.append(exclude_token_id)
+        query += " LIMIT 1"
+        cursor = await db.execute(query, params)
+        if await cursor.fetchone():
+            raise ValueError(f"账号已存在: {identities[0]}")
+
     # Token operations
     async def add_token(self, token: Token) -> int:
         """Add a new token"""
         async with self._connect(write=True) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await self._ensure_token_identity_available(
+                db,
+                email=token.email,
+                login_account=token.login_account,
+            )
             cursor = await db.execute(
                 """
                 INSERT INTO tokens (st, at, at_expires, email, name, remark, is_active,
@@ -1147,7 +1186,16 @@ class Database:
         """Get token by email"""
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM tokens WHERE email = ?", (email,))
+            cursor = await db.execute(
+                """
+                SELECT * FROM tokens
+                WHERE email = ? COLLATE NOCASE
+                   OR login_account = ? COLLATE NOCASE
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (email, email),
+            )
             row = await cursor.fetchone()
             if row:
                 return Token(**dict(row))
@@ -1262,6 +1310,14 @@ class Database:
     async def update_token(self, token_id: int, **kwargs):
         """Update token fields"""
         async with self._connect(write=True) as db:
+            if "email" in kwargs or "login_account" in kwargs:
+                await db.execute("BEGIN IMMEDIATE")
+                await self._ensure_token_identity_available(
+                    db,
+                    email=kwargs.get("email"),
+                    login_account=kwargs.get("login_account"),
+                    exclude_token_id=token_id,
+                )
             updates = []
             params = []
 

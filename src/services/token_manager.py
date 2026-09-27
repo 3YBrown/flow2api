@@ -350,6 +350,9 @@ class TokenManager:
                     google_cookies.encode("utf-8")
                 ).hexdigest()[:16]
                 email = f"account-{account_hash}@flow.local"
+            existing_identity = await self.db.get_token_by_email(email) if email else None
+            if existing_identity:
+                raise ValueError(f"账号已存在: {email}")
             name = user_info.get("name", email.split("@")[0] if email else "")
             at_expires = None
             if expires:
@@ -357,6 +360,8 @@ class TokenManager:
                     at_expires = datetime.fromisoformat(expires.replace("Z", "+00:00"))
                 except Exception:
                     pass
+        except ValueError:
+            raise
         except Exception as e:
             raise ValueError(f"ST?AT??: {str(e)}")
 
@@ -462,6 +467,7 @@ class TokenManager:
         st: Optional[str] = None,
         at: Optional[str] = None,
         at_expires: Optional[datetime] = None,
+        email: Optional[str] = None,
         project_id: Optional[str] = None,
         project_name: Optional[str] = None,
         remark: Optional[str] = None,
@@ -492,6 +498,12 @@ class TokenManager:
             update_fields["at"] = at
         if at_expires is not None:
             update_fields["at_expires"] = at_expires
+        if email is not None:
+            normalized_email = email.strip().lower()
+            existing_identity = await self.db.get_token_by_email(normalized_email)
+            if existing_identity and existing_identity.id != token_id:
+                raise ValueError(f"账号已存在: {normalized_email}")
+            update_fields["email"] = normalized_email
         if project_id is not None:
             update_fields["current_project_id"] = project_id
         if project_name is not None:

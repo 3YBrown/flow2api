@@ -7,8 +7,8 @@ import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from typing import Optional, List, Dict, Any, Literal
 import secrets
 import time
 import re
@@ -685,13 +685,21 @@ class AddTokenRequest(BaseModel):
     video_enabled: bool = True
     image_concurrency: int = -1
     video_concurrency: int = -1
-    protocol_mode: str = "session"
-    google_cookies: Optional[str] = None
-    login_account: Optional[str] = None
+    protocol_mode: Literal["protocol"] = "protocol"
+    google_cookies: str = Field(min_length=1, max_length=524288)
+    login_account: str = Field(min_length=3, max_length=254)
     login_password: Optional[str] = None
     proxy_url: Optional[str] = None
     auto_refresh_enabled: bool = True
     refresh_interval_minutes: int = 120
+
+    @field_validator("login_account")
+    @classmethod
+    def validate_login_account(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", normalized):
+            raise ValueError("login_account must be a valid email address")
+        return normalized
 
 
 class UpdateTokenRequest(BaseModel):
@@ -705,13 +713,23 @@ class UpdateTokenRequest(BaseModel):
     video_enabled: Optional[bool] = None
     image_concurrency: Optional[int] = None
     video_concurrency: Optional[int] = None
-    protocol_mode: Optional[str] = None
-    google_cookies: Optional[str] = None
+    protocol_mode: Optional[Literal["protocol"]] = None
+    google_cookies: Optional[str] = Field(default=None, max_length=524288)
     login_account: Optional[str] = None
     login_password: Optional[str] = None
     proxy_url: Optional[str] = None
     auto_refresh_enabled: Optional[bool] = None
     refresh_interval_minutes: Optional[int] = None
+
+    @field_validator("login_account")
+    @classmethod
+    def validate_login_account(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", normalized):
+            raise ValueError("login_account must be a valid email address")
+        return normalized
 
 
 class ProxyConfigRequest(BaseModel):
@@ -771,36 +789,70 @@ class ST2ATRequest(BaseModel):
 
 
 class ImportTokenItem(BaseModel):
-    """导入Token项"""
+    """Current Flow account import item."""
 
-    email: Optional[str] = None
-    access_token: Optional[str] = None
-    session_token: Optional[str] = None
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    login_account: str = Field(min_length=3, max_length=254)
+    google_cookies: str = Field(min_length=1, max_length=524288)
+    remark: Optional[str] = Field(default=None, max_length=512)
+    project_id: Optional[str] = Field(default=None, max_length=255)
+    project_name: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = True
-    captcha_proxy_url: Optional[str] = None
-    extension_route_key: Optional[str] = None
+    captcha_proxy_url: Optional[str] = Field(default=None, max_length=4096)
+    extension_route_key: Optional[str] = Field(default=None, max_length=255)
     image_enabled: bool = True
     video_enabled: bool = True
-    image_concurrency: int = -1
-    video_concurrency: int = -1
-    protocol_mode: str = "session"
-    google_cookies: Optional[str] = None
-    login_account: Optional[str] = None
-    login_password: Optional[str] = None
-    proxy_url: Optional[str] = None
+    image_concurrency: int = Field(default=-1, ge=-1)
+    video_concurrency: int = Field(default=-1, ge=-1)
+    protocol_mode: Literal["protocol"] = "protocol"
+    proxy_url: Optional[str] = Field(default=None, max_length=4096)
     auto_refresh_enabled: bool = True
-    refresh_interval_minutes: int = 120
+    refresh_interval_minutes: int = Field(default=120, ge=1, le=10080)
+
+    @field_validator("login_account")
+    @classmethod
+    def validate_login_account(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", normalized):
+            raise ValueError("login_account must be a valid email address")
+        return normalized
 
 
 class ImportTokensRequest(BaseModel):
-    """导入Token请求"""
+    """Current Flow account import request."""
 
-    tokens: List[ImportTokenItem]
+    tokens: List[ImportTokenItem] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_unique_accounts(self):
+        identities = [item.login_account for item in self.tokens]
+        if len(identities) != len(set(identities)):
+            raise ValueError("duplicate login_account entries are not allowed")
+        return self
 
 
 class TokenRefreshConfigRequest(BaseModel):
     enabled: Optional[bool] = None
     refresh_interval_minutes: Optional[int] = None
+
+
+class PluginTokenUpdateRequest(BaseModel):
+    """Current Chrome extension credential payload."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    google_cookies: str = Field(min_length=1, max_length=524288)
+    login_account: str = Field(min_length=3, max_length=254)
+    protocol_mode: Literal["protocol"] = "protocol"
+
+    @field_validator("login_account")
+    @classmethod
+    def validate_login_account(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", normalized):
+            raise ValueError("login_account must be a valid email address")
+        return normalized
 
 
 # ========== Auth Middleware ==========
@@ -1048,7 +1100,7 @@ async def add_token(request: AddTokenRequest, token: str = Depends(verify_admin_
 async def update_token(
     token_id: int, request: UpdateTokenRequest, token: str = Depends(verify_admin_token)
 ):
-    """Update token - 使用ST自动刷新AT"""
+    """Validate current Flow cookies and update an account."""
     try:
         existing = await token_manager.get_token(token_id)
         session_value = request.st or (existing.st if existing else "")
@@ -1079,6 +1131,7 @@ async def update_token(
             st=session_value,
             at=at,
             at_expires=at_expires,  # 🆕 更新AT过期时间
+            email=request.login_account,
             project_id=request.project_id,
             project_name=request.project_name,
             remark=request.remark,
@@ -1112,6 +1165,8 @@ async def update_token(
                 )
 
         return {"success": True, "message": "Token更新成功"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1228,43 +1283,37 @@ async def st_to_at(request: ST2ATRequest, token: str = Depends(verify_admin_toke
 async def import_tokens(
     request: ImportTokensRequest, token: str = Depends(verify_admin_token)
 ):
-    """批量导入Token"""
+    """Validate and import current Flow accounts."""
     from datetime import datetime, timezone
 
     added = 0
     updated = 0
     errors = []
-    # 保持与历史逻辑一致：按 created_at DESC 的结果中，优先命中同邮箱“最新一条”
     existing_by_email = {}
     for existing_token in await token_manager.get_all_tokens():
-        if existing_token.email and existing_token.email not in existing_by_email:
-            existing_by_email[existing_token.email] = existing_token
+        identity_values = {
+            str(existing_token.email or "").strip().lower(),
+            str(existing_token.login_account or "").strip().lower(),
+        }
+        for identity in identity_values:
+            if identity and identity not in existing_by_email:
+                existing_by_email[identity] = existing_token
 
     for idx, item in enumerate(request.tokens):
         try:
-            google_cookies = str(item.google_cookies or "").strip()
-            if not google_cookies:
-                errors.append(f"第{idx + 1}项: 缺少 google_cookies")
-                continue
+            google_cookies = item.google_cookies
+            email = item.login_account
             cookie_hash = hashlib.sha256(google_cookies.encode("utf-8")).hexdigest()
-            st = item.session_token or f"frontend-{cookie_hash[:32]}"
+            st = f"frontend-{cookie_hash[:32]}"
 
-            # 使用 ST 转 AT 获取用户信息
             try:
                 result = await token_manager.flow_client.st_to_at(
                     st,
                     google_cookies=google_cookies,
                 )
                 at = result["access_token"]
-                email = (
-                    item.email
-                    or item.login_account
-                    or result.get("user", {}).get("email")
-                    or f"account-{cookie_hash[:16]}@flow.local"
-                )
                 expires = result.get("expires")
 
-                # 解析过期时间
                 at_expires = None
                 is_expired = False
                 if expires:
@@ -1272,22 +1321,23 @@ async def import_tokens(
                         at_expires = datetime.fromisoformat(
                             expires.replace("Z", "+00:00")
                         )
-                        # 判断是否过期
                         now = datetime.now(timezone.utc)
                         is_expired = at_expires <= now
-                    except:
+                    except (TypeError, ValueError):
                         pass
 
-                # 使用邮箱检查是否已存在
-                existing = existing_by_email.get(email)
+                existing = existing_by_email.get(email.lower())
 
                 if existing:
-                    # 更新现有Token
                     await token_manager.update_token(
                         token_id=existing.id,
                         st=st,
                         at=at,
                         at_expires=at_expires,
+                        email=email,
+                        project_id=item.project_id,
+                        project_name=item.project_name,
+                        remark=item.remark,
                         captcha_proxy_url=item.captcha_proxy_url.strip()
                         if item.captcha_proxy_url is not None
                         else None,
@@ -1299,38 +1349,34 @@ async def import_tokens(
                         image_concurrency=item.image_concurrency,
                         video_concurrency=item.video_concurrency,
                         protocol_mode=item.protocol_mode,
-                        google_cookies=item.google_cookies,
-                        login_account=item.login_account,
-                        login_password=item.login_password,
+                        google_cookies=google_cookies,
+                        login_account=email,
                         proxy_url=item.proxy_url,
                         auto_refresh_enabled=item.auto_refresh_enabled,
                         refresh_interval_minutes=item.refresh_interval_minutes,
                     )
-                    # 如果过期则禁用
-                    if is_expired:
+                    should_enable = item.is_active and not is_expired
+                    if should_enable:
+                        await token_manager.enable_token(existing.id)
+                    else:
                         await token_manager.disable_token(existing.id)
-                        existing.is_active = False
-                    existing.st = st
-                    existing.at = at
-                    existing.at_expires = at_expires
-                    existing.captcha_proxy_url = item.captcha_proxy_url
-                    existing.extension_route_key = item.extension_route_key
-                    existing.image_enabled = item.image_enabled
-                    existing.video_enabled = item.video_enabled
-                    existing.image_concurrency = item.image_concurrency
-                    existing.video_concurrency = item.video_concurrency
-                    existing.protocol_mode = item.protocol_mode
-                    existing.google_cookies = item.google_cookies or ""
-                    existing.login_account = item.login_account or ""
-                    existing.login_password = item.login_password or ""
-                    existing.proxy_url = item.proxy_url or ""
-                    existing.auto_refresh_enabled = item.auto_refresh_enabled
-                    existing.refresh_interval_minutes = item.refresh_interval_minutes
+                    if concurrency_manager:
+                        await concurrency_manager.reset_token(
+                            existing.id,
+                            image_concurrency=item.image_concurrency,
+                            video_concurrency=item.video_concurrency,
+                        )
+                    existing.is_active = should_enable
+                    existing.email = email
+                    existing.login_account = email
+                    existing_by_email[email.lower()] = existing
                     updated += 1
                 else:
-                    # 添加新Token
                     new_token = await token_manager.add_token(
                         st=st,
+                        project_id=item.project_id,
+                        project_name=item.project_name,
+                        remark=item.remark,
                         captcha_proxy_url=item.captcha_proxy_url.strip()
                         if item.captcha_proxy_url is not None
                         else None,
@@ -1342,28 +1388,33 @@ async def import_tokens(
                         image_concurrency=item.image_concurrency,
                         video_concurrency=item.video_concurrency,
                         protocol_mode=item.protocol_mode,
-                        google_cookies=item.google_cookies,
-                        login_account=item.login_account,
-                        login_password=item.login_password,
+                        google_cookies=google_cookies,
+                        login_account=email,
                         proxy_url=item.proxy_url,
                         auto_refresh_enabled=item.auto_refresh_enabled,
                         refresh_interval_minutes=item.refresh_interval_minutes,
                     )
-                    # 如果过期则禁用
-                    if is_expired:
+                    should_enable = item.is_active and not is_expired
+                    if not should_enable:
                         await token_manager.disable_token(new_token.id)
                         new_token.is_active = False
-                    existing_by_email[email] = new_token
+                    if concurrency_manager:
+                        await concurrency_manager.reset_token(
+                            new_token.id,
+                            image_concurrency=item.image_concurrency,
+                            video_concurrency=item.video_concurrency,
+                        )
+                    existing_by_email[email.lower()] = new_token
                     added += 1
 
             except Exception as e:
-                errors.append(f"第{idx+1}项: {str(e)}")
+                errors.append(f"第{idx + 1}项 ({email}): {str(e)}")
 
         except Exception as e:
-            errors.append(f"第{idx+1}项: {str(e)}")
+            errors.append(f"第{idx + 1}项: {str(e)}")
 
     return {
-        "success": True,
+        "success": not errors or added + updated > 0,
         "added": added,
         "updated": updated,
         "errors": errors if errors else None,
@@ -2489,15 +2540,20 @@ async def test_captcha_score(
 
 async def _verify_plugin_connection_token(authorization: Optional[str]) -> None:
     plugin_config = await db.get_plugin_config()
-    provided_token = None
-    if authorization:
-        if authorization.startswith("Bearer "):
-            provided_token = authorization[7:]
-        else:
-            provided_token = authorization
+    provided_token = ""
+    normalized_authorization = str(authorization or "").strip()
+    if normalized_authorization:
+        scheme, separator, credentials = normalized_authorization.partition(" ")
+        provided_token = (
+            credentials.strip()
+            if separator and scheme.lower() == "bearer"
+            else normalized_authorization
+        )
+    expected_token = str(plugin_config.connection_token or "")
     if (
-        not plugin_config.connection_token
-        or provided_token != plugin_config.connection_token
+        not expected_token
+        or not provided_token
+        or not secrets.compare_digest(provided_token, expected_token)
     ):
         raise HTTPException(status_code=401, detail="Invalid connection token")
 
@@ -2509,12 +2565,23 @@ async def get_plugin_config(request: Request, token: str = Depends(verify_admin_
 
     # Get the actual domain and port from the request
     # This allows the connection URL to reflect the user's actual access path
-    host_header = request.headers.get("host", "")
+    host_header = (
+        request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+        or request.headers.get("host", "").strip()
+    )
+    forwarded_scheme = (
+        request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    )
+    scheme = (
+        forwarded_scheme
+        if forwarded_scheme in {"http", "https"}
+        else request.url.scheme
+    )
 
     # Generate connection URL based on actual request
     if host_header:
         # Use the actual domain/IP and port from the request
-        connection_url = f"http://{host_header}/api/plugin/update-token"
+        connection_url = f"{scheme}://{host_header}/api/plugin/update-token"
     else:
         # Fallback to config-based URL
         from ..core.config import config
@@ -2563,33 +2630,15 @@ async def update_plugin_config(request: dict, token: str = Depends(verify_admin_
 
 @router.post("/api/plugin/update-token")
 async def plugin_update_token(
-    request: dict, authorization: Optional[str] = Header(None)
+    request: PluginTokenUpdateRequest,
+    authorization: Optional[str] = Header(None),
 ):
-    """Receive a legacy session token and/or modern Google Flow cookies."""
+    """Validate and store credentials pushed by Token Updater 1.3+."""
     await _verify_plugin_connection_token(authorization)
     plugin_config = await db.get_plugin_config()
 
-    session_token_raw = request.get("session_token")
-    if session_token_raw is not None and not isinstance(session_token_raw, str):
-        raise HTTPException(status_code=400, detail="session_token must be a string")
-    session_token = (session_token_raw or "").strip()
-    if len(session_token) > 262144:
-        raise HTTPException(status_code=413, detail="session_token is too large")
-
-    google_cookies_raw = request.get("google_cookies")
-    if google_cookies_raw is not None and not isinstance(google_cookies_raw, str):
-        raise HTTPException(status_code=400, detail="google_cookies must be a string")
-
-    google_cookies = (google_cookies_raw or "").strip()
-    if len(google_cookies) > 524288:
-        raise HTTPException(status_code=413, detail="google_cookies is too large")
-    if not google_cookies:
-        raise HTTPException(
-            status_code=400,
-            detail="Current Flow authentication requires google_cookies",
-        )
-
-    login_account_hint = str(request.get("login_account") or "").strip() or None
+    google_cookies = request.google_cookies
+    email = request.login_account
 
     try:
         result = await token_manager.flow_client.st_to_at(
@@ -2610,14 +2659,8 @@ async def plugin_update_token(
             detail=f"Invalid Google cookies: {str(cookie_error)}",
         ) from cookie_error
 
-    email = login_account_hint or str(request.get("email") or "").strip()
-    if not email:
-        account_hash = hashlib.sha256(google_cookies.encode("utf-8")).hexdigest()[:16]
-        email = f"account-{account_hash}@flow.local"
     cookie_hash = hashlib.sha256(google_cookies.encode("utf-8")).hexdigest()[:32]
     session_token = f"frontend-{cookie_hash}"
-    protocol_mode = "protocol"
-    login_account = email
 
     # Step 2: Check if token with this email exists
     existing_token = await db.get_token_by_email(email)
@@ -2631,13 +2674,10 @@ async def plugin_update_token(
                 st=session_token,
                 at=at,
                 at_expires=at_expires,
-                protocol_mode=protocol_mode,
-                google_cookies=google_cookies or None,
-                login_account=login_account,
-                login_password=request.get("login_password"),
-                proxy_url=request.get("proxy_url"),
-                auto_refresh_enabled=request.get("auto_refresh_enabled"),
-                refresh_interval_minutes=request.get("refresh_interval_minutes"),
+                email=email,
+                protocol_mode=request.protocol_mode,
+                google_cookies=google_cookies,
+                login_account=email,
             )
 
             # Check if auto-enable is enabled and token is disabled
@@ -2665,13 +2705,11 @@ async def plugin_update_token(
             new_token = await token_manager.add_token(
                 st=session_token,
                 remark="Added by Chrome Extension",
-                protocol_mode=protocol_mode,
-                google_cookies=google_cookies or None,
-                login_account=login_account,
-                login_password=request.get("login_password"),
-                proxy_url=request.get("proxy_url"),
-                auto_refresh_enabled=request.get("auto_refresh_enabled", True),
-                refresh_interval_minutes=request.get("refresh_interval_minutes", 120),
+                protocol_mode=request.protocol_mode,
+                google_cookies=google_cookies,
+                login_account=email,
+                auto_refresh_enabled=True,
+                refresh_interval_minutes=120,
             )
 
             return {

@@ -56,7 +56,7 @@
 - 默认 `docker-compose.yml` 建议搭配第三方打码（yescaptcha/captcharun/capmonster/ezcaptcha/capsolver）。
 如需 Docker 内有头打码（browser/personal），请使用下方 `docker-compose.headed.yml`。
 
-- 自动更新st浏览器拓展：[Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater)
+- 自动推送新版 Flow 登录态的浏览器扩展：[Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater)。
 
 ### 方式一：Docker 部署（推荐）
 
