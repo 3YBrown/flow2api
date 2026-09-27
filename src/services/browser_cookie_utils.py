@@ -7,9 +7,9 @@ import json
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
-DEFAULT_COOKIE_URL = "https://labs.google/"
+DEFAULT_COOKIE_URL = "https://flow.google.com/"
 DEFAULT_GOOGLE_COOKIE_TARGET_URLS = (
-    "https://labs.google/",
+    "https://flow.google.com/",
     "https://www.google.com/",
 )
 _COOKIE_ATTRIBUTE_KEYS = {
@@ -73,7 +73,9 @@ def _normalize_same_site(value: Any) -> Optional[str]:
     return None
 
 
-def _build_cookie_from_mapping(raw_cookie: Dict[str, Any], default_url: str) -> Optional[Dict[str, Any]]:
+def _build_cookie_from_mapping(
+    raw_cookie: Dict[str, Any], default_url: str
+) -> Optional[Dict[str, Any]]:
     name = str(raw_cookie.get("name") or "").strip()
     if not name:
         return None
@@ -114,7 +116,9 @@ def _build_cookie_from_mapping(raw_cookie: Dict[str, Any], default_url: str) -> 
     return cookie
 
 
-def parse_browser_cookie_payload(raw_cookie: Any, default_url: str = DEFAULT_COOKIE_URL) -> List[Dict[str, Any]]:
+def parse_browser_cookie_payload(
+    raw_cookie: Any, default_url: str = DEFAULT_COOKIE_URL
+) -> List[Dict[str, Any]]:
     normalized = normalize_cookie_storage_text(raw_cookie)
     if not normalized:
         return []
@@ -168,20 +172,27 @@ def build_browser_cookie_targets(
     normalized = normalize_cookie_storage_text(raw_cookie)
     if not normalized:
         return []
-    target_urls = tuple(
+    target_urls = (
+        tuple(
         dict.fromkeys(
             [
                 str(url or "").strip()
-                for url in (fallback_urls or list(DEFAULT_GOOGLE_COOKIE_TARGET_URLS))
+                    for url in (
+                        fallback_urls or list(DEFAULT_GOOGLE_COOKIE_TARGET_URLS)
+                    )
                 if str(url or "").strip()
             ]
         )
-    ) or DEFAULT_GOOGLE_COOKIE_TARGET_URLS
+        )
+        or DEFAULT_GOOGLE_COOKIE_TARGET_URLS
+    )
     expanded: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
     def append_cookie(cookie: Dict[str, Any]):
-        stable_key = json.dumps(cookie, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        stable_key = json.dumps(
+            cookie, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        )
         if stable_key in seen:
             return
         seen.add(stable_key)
@@ -204,7 +215,8 @@ def build_browser_cookie_targets(
                 if not normalized_item:
                     continue
                 explicit_scope = bool(
-                    str(item.get("url") or "").strip() or str(item.get("domain") or "").strip()
+                    str(item.get("url") or "").strip()
+                    or str(item.get("domain") or "").strip()
                 )
                 if explicit_scope:
                     append_cookie(normalized_item)
@@ -253,7 +265,11 @@ def merge_browser_cookie_payloads(
         if raw_cookie is None:
             return
         if isinstance(raw_cookie, dict):
-            payload = raw_cookie.get("cookies") if isinstance(raw_cookie.get("cookies"), list) else [raw_cookie]
+            payload = (
+                raw_cookie.get("cookies")
+                if isinstance(raw_cookie.get("cookies"), list)
+                else [raw_cookie]
+            )
         elif isinstance(raw_cookie, list):
             payload = raw_cookie
         else:
@@ -276,7 +292,9 @@ def merge_browser_cookie_payloads(
     return json.dumps(list(merged.values()), ensure_ascii=False, separators=(",", ":"))
 
 
-def serialize_cookie_header(raw_cookie: Any, default_url: str = DEFAULT_COOKIE_URL) -> str:
+def serialize_cookie_header(
+    raw_cookie: Any, default_url: str = DEFAULT_COOKIE_URL
+) -> str:
     normalized = normalize_cookie_storage_text(raw_cookie)
     cookies = parse_browser_cookie_payload(raw_cookie, default_url=default_url)
     if not cookies:
@@ -292,7 +310,9 @@ def serialize_cookie_header(raw_cookie: Any, default_url: str = DEFAULT_COOKIE_U
     return "; ".join(parts)
 
 
-def extract_session_token_from_cookie_payload(raw_cookie: Any, default_url: str = DEFAULT_COOKIE_URL) -> str:
+def extract_session_token_from_cookie_payload(
+    raw_cookie: Any, default_url: str = DEFAULT_COOKIE_URL
+) -> str:
     for cookie in parse_browser_cookie_payload(raw_cookie, default_url=default_url):
         name = str(cookie.get("name") or "").strip()
         if name not in _SESSION_TOKEN_COOKIE_NAMES:
@@ -307,9 +327,13 @@ def extract_session_token_from_cookie_payload(raw_cookie: Any, default_url: str 
     return ""
 
 
-def build_cookie_signature(raw_cookie: Any, default_url: str = DEFAULT_COOKIE_URL) -> str:
+def build_cookie_signature(
+    raw_cookie: Any, default_url: str = DEFAULT_COOKIE_URL
+) -> str:
     cookies = parse_browser_cookie_payload(raw_cookie, default_url=default_url)
     if not cookies:
         return ""
-    stable_payload = json.dumps(cookies, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    stable_payload = json.dumps(
+        cookies, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    )
     return hashlib.sha256(stable_payload.encode("utf-8")).hexdigest()

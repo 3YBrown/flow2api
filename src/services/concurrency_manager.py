@@ -1,4 +1,5 @@
 """Concurrency manager for token-based rate limiting"""
+
 import asyncio
 import time
 from typing import Dict, Optional
@@ -42,7 +43,9 @@ class ConcurrencyManager:
                 if token.video_concurrency and token.video_concurrency > 0:
                     self._video_limits[token.id] = token.video_concurrency
 
-            debug_logger.log_info(f"Concurrency manager initialized with {len(tokens)} tokens")
+            debug_logger.log_info(
+                f"Concurrency manager initialized with {len(tokens)} tokens"
+            )
 
     async def can_use_image(self, token_id: int) -> bool:
         """
@@ -114,12 +117,18 @@ class ConcurrencyManager:
             new_inflight = inflight + 1
             self._image_inflight[token_id] = new_inflight
             if limit is None:
-                debug_logger.log_info(f"Token {token_id} acquired image slot (inflight: {new_inflight}, limit: unlimited)")
+                debug_logger.log_info(
+                    f"Token {token_id} acquired image slot (inflight: {new_inflight}, limit: unlimited)"
+                )
             else:
-                debug_logger.log_info(f"Token {token_id} acquired image slot (inflight: {new_inflight}/{limit})")
+                debug_logger.log_info(
+                    f"Token {token_id} acquired image slot (inflight: {new_inflight}/{limit})"
+                )
             return True
 
-    async def wait_acquire_image(self, token_id: int, timeout_seconds: float) -> tuple[bool, int]:
+    async def wait_acquire_image(
+        self, token_id: int, timeout_seconds: float
+    ) -> tuple[bool, int]:
         """等待获取图片硬并发槽位，避免请求在短暂竞争下直接失败。"""
         wait_started = time.monotonic()
         timeout_seconds = max(1.0, float(timeout_seconds or 1.0))
@@ -136,7 +145,9 @@ class ConcurrencyManager:
 
             await asyncio.sleep(0.05)
 
-    async def wait_acquire_video(self, token_id: int, timeout_seconds: float) -> tuple[bool, int]:
+    async def wait_acquire_video(
+        self, token_id: int, timeout_seconds: float
+    ) -> tuple[bool, int]:
         """等待获取视频硬并发槽位，避免请求在短暂竞争下直接失败。"""
         wait_started = time.monotonic()
         timeout_seconds = max(1.0, float(timeout_seconds or 1.0))
@@ -173,9 +184,13 @@ class ConcurrencyManager:
             new_inflight = inflight + 1
             self._video_inflight[token_id] = new_inflight
             if limit is None:
-                debug_logger.log_info(f"Token {token_id} acquired video slot (inflight: {new_inflight}, limit: unlimited)")
+                debug_logger.log_info(
+                    f"Token {token_id} acquired video slot (inflight: {new_inflight}, limit: unlimited)"
+                )
             else:
-                debug_logger.log_info(f"Token {token_id} acquired video slot (inflight: {new_inflight}/{limit})")
+                debug_logger.log_info(
+                    f"Token {token_id} acquired video slot (inflight: {new_inflight}/{limit})"
+                )
             return True
 
     async def release_image(self, token_id: int):
@@ -189,16 +204,22 @@ class ConcurrencyManager:
             inflight = self._image_inflight.get(token_id, 0)
             if inflight <= 0:
                 self._image_inflight[token_id] = 0
-                debug_logger.log_warning(f"Token {token_id} release_image called with inflight=0")
+                debug_logger.log_warning(
+                    f"Token {token_id} release_image called with inflight=0"
+                )
                 return
 
             new_inflight = inflight - 1
             self._image_inflight[token_id] = new_inflight
             limit = self._image_limits.get(token_id)
             if limit is None:
-                debug_logger.log_info(f"Token {token_id} released image slot (inflight: {new_inflight}, limit: unlimited)")
+                debug_logger.log_info(
+                    f"Token {token_id} released image slot (inflight: {new_inflight}, limit: unlimited)"
+                )
             else:
-                debug_logger.log_info(f"Token {token_id} released image slot (inflight: {new_inflight}/{limit})")
+                debug_logger.log_info(
+                    f"Token {token_id} released image slot (inflight: {new_inflight}/{limit})"
+                )
 
     async def release_video(self, token_id: int):
         """
@@ -211,16 +232,22 @@ class ConcurrencyManager:
             inflight = self._video_inflight.get(token_id, 0)
             if inflight <= 0:
                 self._video_inflight[token_id] = 0
-                debug_logger.log_warning(f"Token {token_id} release_video called with inflight=0")
+                debug_logger.log_warning(
+                    f"Token {token_id} release_video called with inflight=0"
+                )
                 return
 
             new_inflight = inflight - 1
             self._video_inflight[token_id] = new_inflight
             limit = self._video_limits.get(token_id)
             if limit is None:
-                debug_logger.log_info(f"Token {token_id} released video slot (inflight: {new_inflight}, limit: unlimited)")
+                debug_logger.log_info(
+                    f"Token {token_id} released video slot (inflight: {new_inflight}, limit: unlimited)"
+                )
             else:
-                debug_logger.log_info(f"Token {token_id} released video slot (inflight: {new_inflight}/{limit})")
+                debug_logger.log_info(
+                    f"Token {token_id} released video slot (inflight: {new_inflight}/{limit})"
+                )
 
     async def get_image_remaining(self, token_id: int) -> Optional[int]:
         """
@@ -266,7 +293,9 @@ class ConcurrencyManager:
         async with self._lock:
             return self._video_inflight.get(token_id, 0)
 
-    async def reset_token(self, token_id: int, image_concurrency: int = -1, video_concurrency: int = -1):
+    async def reset_token(
+        self, token_id: int, image_concurrency: int = -1, video_concurrency: int = -1
+    ):
         """
         Reset concurrency counters for a token
 
@@ -290,7 +319,9 @@ class ConcurrencyManager:
             self._image_inflight.setdefault(token_id, 0)
             self._video_inflight.setdefault(token_id, 0)
 
-            debug_logger.log_info(f"Token {token_id} concurrency reset (image: {image_concurrency}, video: {video_concurrency})")
+            debug_logger.log_info(
+                f"Token {token_id} concurrency reset (image: {image_concurrency}, video: {video_concurrency})"
+            )
 
     async def remove_token(self, token_id: int):
         """Remove all concurrency state for a deleted token."""

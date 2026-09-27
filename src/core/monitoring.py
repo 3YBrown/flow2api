@@ -50,6 +50,7 @@ except ModuleNotFoundError:
     def generate_latest(registry: Any = None) -> bytes:
         return b"# prometheus_client is not installed; metrics are disabled\n"
 
+
 from .config import config
 
 _PROCESS_START_TIME = time.time()
@@ -86,7 +87,9 @@ def _to_timestamp(value: Any) -> float:
     return float(dt.timestamp())
 
 
-async def _probe_remote_browser_health(base_url: str, timeout_seconds: float = 3.0) -> tuple[bool, float]:
+async def _probe_remote_browser_health(
+    base_url: str, timeout_seconds: float = 3.0
+) -> tuple[bool, float]:
     normalized = (base_url or "").strip().rstrip("/")
     if not normalized:
         return False, 0.0
@@ -357,9 +360,17 @@ MAIN_UP.set(1.0)
 MAIN_PROCESS_START_TIME.set(_PROCESS_START_TIME)
 
 
-def record_generation_result(generation_type: str, result: str, duration_seconds: Optional[float]) -> None:
-    normalized_type = generation_type if generation_type in {"image", "video"} else "unknown"
-    normalized_result = result if result in {"success", "failed", "cancelled", "no_token", "invalid"} else "unknown"
+def record_generation_result(
+    generation_type: str, result: str, duration_seconds: Optional[float]
+) -> None:
+    normalized_type = (
+        generation_type if generation_type in {"image", "video"} else "unknown"
+    )
+    normalized_result = (
+        result
+        if result in {"success", "failed", "cancelled", "no_token", "invalid"}
+        else "unknown"
+    )
     GENERATION_REQUESTS_TOTAL.labels(
         generation_type=normalized_type,
         result=normalized_result,
@@ -377,7 +388,9 @@ def record_token_refresh(kind: str, result: str) -> None:
     TOKEN_REFRESH_TOTAL.labels(kind=normalized_kind, result=normalized_result).inc()
 
 
-async def update_main_runtime_metrics(db: Any, concurrency_manager: Optional[Any] = None) -> None:
+async def update_main_runtime_metrics(
+    db: Any, concurrency_manager: Optional[Any] = None
+) -> None:
     rows = await db.get_all_tokens_with_stats()
     now = datetime.now(timezone.utc)
 
@@ -454,13 +467,19 @@ async def update_main_runtime_metrics(db: Any, concurrency_manager: Optional[Any
         image_inflight = 0
         video_inflight = 0
         if concurrency_manager is not None:
-            image_inflight = int(await concurrency_manager.get_image_inflight(int(token_id)))
-            video_inflight = int(await concurrency_manager.get_video_inflight(int(token_id)))
+            image_inflight = int(
+                await concurrency_manager.get_image_inflight(int(token_id))
+            )
+            video_inflight = int(
+                await concurrency_manager.get_video_inflight(int(token_id))
+            )
         total_image_inflight += image_inflight
         total_video_inflight += video_inflight
 
         TOKEN_ACTIVE.labels(token_id=token_id).set(1.0 if is_active else 0.0)
-        TOKEN_AT_EXPIRES_TIMESTAMP.labels(token_id=token_id).set(_to_timestamp(at_expires))
+        TOKEN_AT_EXPIRES_TIMESTAMP.labels(token_id=token_id).set(
+            _to_timestamp(at_expires)
+        )
         TOKEN_EXPIRED.labels(token_id=token_id).set(1.0 if expired else 0.0)
         TOKEN_EXPIRING_SOON.labels(token_id=token_id).set(1.0 if expiring_soon else 0.0)
         TOKEN_MISSING_AT.labels(token_id=token_id).set(1.0 if not at_value else 0.0)
@@ -470,7 +489,9 @@ async def update_main_runtime_metrics(db: Any, concurrency_manager: Optional[Any
         TOKEN_CREDITS.labels(token_id=token_id).set(float(credits))
         TOKEN_ERROR_TOTAL.labels(token_id=token_id).set(float(error_count))
         TOKEN_TODAY_ERROR_TOTAL.labels(token_id=token_id).set(float(today_error_count))
-        TOKEN_CONSECUTIVE_ERROR_TOTAL.labels(token_id=token_id).set(float(consecutive_error_count))
+        TOKEN_CONSECUTIVE_ERROR_TOTAL.labels(token_id=token_id).set(
+            float(consecutive_error_count)
+        )
         TOKEN_LAST_USED_TIMESTAMP.labels(token_id=token_id).set(last_used_at)
         TOKEN_LAST_ERROR_TIMESTAMP.labels(token_id=token_id).set(last_error_at)
         TOKEN_IMAGE_INFLIGHT.labels(token_id=token_id).set(float(image_inflight))
@@ -499,11 +520,15 @@ async def update_main_runtime_metrics(db: Any, concurrency_manager: Optional[Any
     DASHBOARD_TODAY_ERRORS.set(float(dashboard_stats.get("today_errors") or 0))
 
     remote_browser_base_url = (config.remote_browser_base_url or "").strip()
-    remote_browser_configured = config.captcha_method == "remote_browser" and bool(remote_browser_base_url)
+    remote_browser_configured = config.captcha_method == "remote_browser" and bool(
+        remote_browser_base_url
+    )
     REMOTE_BROWSER_CONFIGURED.set(1.0 if remote_browser_configured else 0.0)
 
     if remote_browser_configured:
-        remote_browser_up, remote_browser_latency = await _probe_remote_browser_health(remote_browser_base_url)
+        remote_browser_up, remote_browser_latency = await _probe_remote_browser_health(
+            remote_browser_base_url
+        )
         REMOTE_BROWSER_TARGET_UP.set(1.0 if remote_browser_up else 0.0)
         REMOTE_BROWSER_TARGET_LATENCY_SECONDS.set(float(remote_browser_latency))
     else:
@@ -511,7 +536,9 @@ async def update_main_runtime_metrics(db: Any, concurrency_manager: Optional[Any
         REMOTE_BROWSER_TARGET_LATENCY_SECONDS.set(0.0)
 
 
-async def render_main_metrics(db: Any, concurrency_manager: Optional[Any] = None) -> bytes:
+async def render_main_metrics(
+    db: Any, concurrency_manager: Optional[Any] = None
+) -> bytes:
     await update_main_runtime_metrics(db, concurrency_manager=concurrency_manager)
     return generate_latest(MAIN_REGISTRY)
 
@@ -539,7 +566,9 @@ async def build_public_health_snapshot(db: Any) -> dict[str, Any]:
             elif (at_expires - now).total_seconds() < 3600:
                 expiring_soon_tokens += 1
 
-        if (not bool(row.get("is_active"))) and str(row.get("ban_reason") or "").strip() == "429_rate_limit":
+        if (not bool(row.get("is_active"))) and str(
+            row.get("ban_reason") or ""
+        ).strip() == "429_rate_limit":
             banned_429_tokens += 1
 
     return {

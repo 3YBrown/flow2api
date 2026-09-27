@@ -1,4 +1,5 @@
 """File caching service"""
+
 import os
 import asyncio
 import hashlib
@@ -44,7 +45,9 @@ class FileCache:
 
     def _get_request_fingerprint(self) -> Optional[Dict[str, Any]]:
         """读取当前请求链路里绑定的浏览器指纹。"""
-        if not self.flow_client or not hasattr(self.flow_client, "get_request_fingerprint"):
+        if not self.flow_client or not hasattr(
+            self.flow_client, "get_request_fingerprint"
+        ):
             return None
 
         try:
@@ -72,7 +75,9 @@ class FileCache:
 
         try:
             # 媒体下载（图片/视频）优先使用独立的上传/下载代理
-            if media_type in ("image", "video") and hasattr(self.proxy_manager, "get_media_proxy_url"):
+            if media_type in ("image", "video") and hasattr(
+                self.proxy_manager, "get_media_proxy_url"
+            ):
                 return await self.proxy_manager.get_media_proxy_url()
 
             # 其他下载走请求代理
@@ -134,7 +139,7 @@ class FileCache:
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
-            "Referer": "https://labs.google/",
+            "Referer": "https://flow.google.com/",
             "Sec-Fetch-Site": "same-origin",
             "Sec-Fetch-Mode": "cors",
         }
@@ -159,7 +164,7 @@ class FileCache:
         headers.setdefault(
             "User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
         return headers
 
@@ -180,7 +185,9 @@ class FileCache:
     async def start_cleanup_task(self):
         """Start background cleanup task"""
         if self._is_cleanup_disabled():
-            debug_logger.log_info("Cache cleanup disabled (timeout <= 0), skip starting cleanup task")
+            debug_logger.log_info(
+                "Cache cleanup disabled (timeout <= 0), skip starting cleanup task"
+            )
             return False
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -216,7 +223,7 @@ class FileCache:
                 debug_logger.log_error(
                     error_message=f"Cleanup task error: {str(e)}",
                     status_code=0,
-                    response_text=""
+                    response_text="",
                 )
 
     async def _cleanup_expired_files(self):
@@ -231,7 +238,9 @@ class FileCache:
             for file_path in self.cache_dir.iterdir():
                 timeout = self.get_timeout()
                 if timeout <= 0:
-                    debug_logger.log_info("Cache cleanup disabled during cleanup pass, stop deleting files")
+                    debug_logger.log_info(
+                        "Cache cleanup disabled during cleanup pass, stop deleting files"
+                    )
                     break
                 if file_path.is_file():
                     # Check file age
@@ -244,13 +253,15 @@ class FileCache:
                             pass
 
             if removed_count > 0:
-                debug_logger.log_info(f"Cleanup: removed {removed_count} expired cache files")
+                debug_logger.log_info(
+                    f"Cleanup: removed {removed_count} expired cache files"
+                )
 
         except Exception as e:
             debug_logger.log_error(
                 error_message=f"Failed to cleanup expired files: {str(e)}",
                 status_code=0,
-                response_text=""
+                response_text="",
             )
 
     def _generate_cache_filename(self, url: str, media_type: str) -> str:
@@ -309,7 +320,9 @@ class FileCache:
             debug_logger.log_info(f"Downloading file from: {url}")
 
             fingerprint = self._get_request_fingerprint()
-            proxy_url = await self._resolve_download_proxy(media_type, fingerprint=fingerprint)
+            proxy_url = await self._resolve_download_proxy(
+                media_type, fingerprint=fingerprint
+            )
             headers = self._build_download_headers(media_type, fingerprint=fingerprint)
 
             # Try method 1: curl_cffi with browser impersonation
@@ -321,7 +334,7 @@ class FileCache:
                         proxy=proxy_url,
                         headers=headers,
                         impersonate="chrome120",
-                        verify=False
+                        verify=False,
                     )
 
                     if response.status_code == 200 and response.content:
@@ -344,22 +357,27 @@ class FileCache:
                 wget_cmd = [
                     "wget",
                     "-q",
-                    "-O", str(file_path),
+                    "-O",
+                    str(file_path),
                     "--timeout=60",
                     "--tries=3",
                     f"--user-agent={headers.get('User-Agent', '')}",
                     f"--header=Accept: {headers.get('Accept', '*/*')}",
                     f"--header=Accept-Language: {headers.get('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8')}",
                     f"--header=Connection: {headers.get('Connection', 'keep-alive')}",
-                    f"--header=Referer: {headers.get('Referer', 'https://labs.google/')}",
+                    f"--header=Referer: {headers.get('Referer', 'https://flow.google.com/')}",
                 ]
 
                 if "sec-ch-ua" in headers:
                     wget_cmd.append(f"--header=sec-ch-ua: {headers['sec-ch-ua']}")
                 if "sec-ch-ua-mobile" in headers:
-                    wget_cmd.append(f"--header=sec-ch-ua-mobile: {headers['sec-ch-ua-mobile']}")
+                    wget_cmd.append(
+                        f"--header=sec-ch-ua-mobile: {headers['sec-ch-ua-mobile']}"
+                    )
                 if "sec-ch-ua-platform" in headers:
-                    wget_cmd.append(f"--header=sec-ch-ua-platform: {headers['sec-ch-ua-platform']}")
+                    wget_cmd.append(
+                        f"--header=sec-ch-ua-platform: {headers['sec-ch-ua-platform']}"
+                    )
 
                 if proxy_url:
                     env = os.environ.copy()
@@ -369,16 +387,24 @@ class FileCache:
                     env = None
 
                 wget_cmd.append(url)
-                result = subprocess.run(wget_cmd, capture_output=True, timeout=90, env=env)
+                result = subprocess.run(
+                    wget_cmd, capture_output=True, timeout=90, env=env
+                )
 
                 if result.returncode == 0 and file_path.exists():
                     file_size = file_path.stat().st_size
                     if file_size > 0:
-                        debug_logger.log_info(f"File cached (wget): {filename} ({file_size} bytes)")
+                        debug_logger.log_info(
+                            f"File cached (wget): {filename} ({file_size} bytes)"
+                        )
                         return filename
                     raise Exception("Downloaded file is empty")
 
-                error_msg = result.stderr.decode("utf-8", errors="ignore") if result.stderr else "Unknown error"
+                error_msg = (
+                    result.stderr.decode("utf-8", errors="ignore")
+                    if result.stderr
+                    else "Unknown error"
+                )
                 debug_logger.log_warning(f"wget failed: {error_msg}, trying curl...")
 
             except FileNotFoundError:
@@ -394,21 +420,32 @@ class FileCache:
                     "curl",
                     "-L",
                     "-s",
-                    "-o", str(file_path),
-                    "--max-time", "60",
-                    "-H", f"Accept: {headers.get('Accept', '*/*')}",
-                    "-H", f"Accept-Language: {headers.get('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8')}",
-                    "-H", f"Connection: {headers.get('Connection', 'keep-alive')}",
-                    "-H", f"Referer: {headers.get('Referer', 'https://labs.google/')}",
-                    "-A", headers.get("User-Agent", ""),
+                    "-o",
+                    str(file_path),
+                    "--max-time",
+                    "60",
+                    "-H",
+                    f"Accept: {headers.get('Accept', '*/*')}",
+                    "-H",
+                    f"Accept-Language: {headers.get('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8')}",
+                    "-H",
+                    f"Connection: {headers.get('Connection', 'keep-alive')}",
+                    "-H",
+                    f"Referer: {headers.get('Referer', 'https://flow.google.com/')}",
+                    "-A",
+                    headers.get("User-Agent", ""),
                 ]
 
                 if "sec-ch-ua" in headers:
                     curl_cmd.extend(["-H", f"sec-ch-ua: {headers['sec-ch-ua']}"])
                 if "sec-ch-ua-mobile" in headers:
-                    curl_cmd.extend(["-H", f"sec-ch-ua-mobile: {headers['sec-ch-ua-mobile']}"])
+                    curl_cmd.extend(
+                        ["-H", f"sec-ch-ua-mobile: {headers['sec-ch-ua-mobile']}"]
+                    )
                 if "sec-ch-ua-platform" in headers:
-                    curl_cmd.extend(["-H", f"sec-ch-ua-platform: {headers['sec-ch-ua-platform']}"])
+                    curl_cmd.extend(
+                        ["-H", f"sec-ch-ua-platform: {headers['sec-ch-ua-platform']}"]
+                    )
                 if proxy_url:
                     curl_cmd.extend(["-x", proxy_url])
 
@@ -418,11 +455,17 @@ class FileCache:
                 if result.returncode == 0 and file_path.exists():
                     file_size = file_path.stat().st_size
                     if file_size > 0:
-                        debug_logger.log_info(f"File cached (curl): {filename} ({file_size} bytes)")
+                        debug_logger.log_info(
+                            f"File cached (curl): {filename} ({file_size} bytes)"
+                        )
                         return filename
                     raise Exception("Downloaded file is empty")
 
-                error_msg = result.stderr.decode("utf-8", errors="ignore") if result.stderr else "Unknown error"
+                error_msg = (
+                    result.stderr.decode("utf-8", errors="ignore")
+                    if result.stderr
+                    else "Unknown error"
+                )
                 raise Exception(f"curl command failed: {error_msg}")
 
             except FileNotFoundError as e:
@@ -430,7 +473,7 @@ class FileCache:
                 debug_logger.log_error(
                     error_message=f"Failed to download file: {str(e)}",
                     status_code=0,
-                    response_text=str(e)
+                    response_text=str(e),
                 )
                 raise Exception(normalized_error) from e
             except Exception as e:
@@ -438,7 +481,7 @@ class FileCache:
                 debug_logger.log_error(
                     error_message=f"Failed to download file: {str(e)}",
                     status_code=0,
-                    response_text=str(e)
+                    response_text=str(e),
                 )
                 raise Exception(normalized_error) from e
 
@@ -461,13 +504,15 @@ class FileCache:
         try:
             video_data = _b64.b64decode(base64_data)
             self._write_cached_content(file_path, video_data)
-            debug_logger.log_info(f"Base64 video cached: {filename} ({len(video_data)} bytes)")
+            debug_logger.log_info(
+                f"Base64 video cached: {filename} ({len(video_data)} bytes)"
+            )
             return filename
         except Exception as e:
             debug_logger.log_error(
                 error_message=f"Failed to cache base64 video: {str(e)}",
                 status_code=0,
-                response_text=""
+                response_text="",
             )
             raise Exception(f"Failed to cache base64 video: {str(e)}")
 
@@ -494,15 +539,17 @@ class FileCache:
         try:
             # Decode base64 and save to file
             image_data = base64.b64decode(base64_data)
-            with open(file_path, 'wb') as f:
+            with open(file_path, "wb") as f:
                 f.write(image_data)
-            debug_logger.log_info(f"Base64 image cached: {filename} ({len(image_data)} bytes)")
+            debug_logger.log_info(
+                f"Base64 image cached: {filename} ({len(image_data)} bytes)"
+            )
             return filename
         except Exception as e:
             debug_logger.log_error(
                 error_message=f"Failed to cache base64 image: {str(e)}",
                 status_code=0,
-                response_text=""
+                response_text="",
             )
             raise Exception(f"Failed to cache base64 image: {str(e)}")
 
@@ -538,6 +585,6 @@ class FileCache:
             debug_logger.log_error(
                 error_message=f"Failed to clear cache: {str(e)}",
                 status_code=0,
-                response_text=""
+                response_text="",
             )
             raise

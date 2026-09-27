@@ -103,20 +103,26 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_recaptcha_on_tab_accepts_remote_object_success_result(self):
         tab = _FakeTab(self._make_remote_object_result("token-xyz"))
 
-        token = await self.service._execute_recaptcha_on_tab(tab, action="IMAGE_GENERATION")
+        token = await self.service._execute_recaptcha_on_tab(
+            tab, action="IMAGE_GENERATION"
+        )
 
         self.assertEqual(token, "token-xyz")
 
     async def test_create_resident_tab_returns_none_when_browser_missing(self):
         self.service.browser = None
 
-        resident_info = await self.service._create_resident_tab("slot-1", project_id="project-1")
+        resident_info = await self.service._create_resident_tab(
+            "slot-1", project_id="project-1"
+        )
 
         self.assertIsNone(resident_info)
 
     async def test_close_clears_resident_tabs_when_warmup_task_attr_missing(self):
         tab = _ClosableFakeTab()
-        self.service._resident_tabs["slot-1"] = ResidentTabInfo(tab=tab, slot_id="slot-1")
+        self.service._resident_tabs["slot-1"] = ResidentTabInfo(
+            tab=tab, slot_id="slot-1"
+        )
         if hasattr(self.service, "_resident_warmup_task"):
             delattr(self.service, "_resident_warmup_task")
 
@@ -128,26 +134,40 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_resident_tab_cleans_tab_when_initialization_fails(self):
         tab = _ClosableFakeTab()
         self.service.browser = types.SimpleNamespace(stopped=False)
-        self.service._create_isolated_context_tab = AsyncMock(return_value=(tab, "context-1"))
+        self.service._create_isolated_context_tab = AsyncMock(
+            return_value=(tab, "context-1")
+        )
         self.service._tab_evaluate = AsyncMock(return_value="complete")
-        self.service._apply_token_cookie_binding = AsyncMock(side_effect=RuntimeError("cookie failed"))
+        self.service._apply_token_cookie_binding = AsyncMock(
+            side_effect=RuntimeError("cookie failed")
+        )
         self.service._dispose_browser_context_quietly = AsyncMock()
         self.service._close_tab_quietly = AsyncMock()
 
-        resident_info = await self.service._create_resident_tab("slot-1", project_id="project-1")
+        resident_info = await self.service._create_resident_tab(
+            "slot-1", project_id="project-1"
+        )
 
         self.assertIsNone(resident_info)
-        self.service._dispose_browser_context_quietly.assert_awaited_once_with("context-1")
+        self.service._dispose_browser_context_quietly.assert_awaited_once_with(
+            "context-1"
+        )
         self.service._close_tab_quietly.assert_awaited_once_with(tab)
 
     async def test_restart_browser_for_project_reuses_recent_healthy_runtime(self):
-        resident_info = ResidentTabInfo(tab=object(), slot_id="slot-1", project_id="project-1")
+        resident_info = ResidentTabInfo(
+            tab=object(), slot_id="slot-1", project_id="project-1"
+        )
         self.service.browser = types.SimpleNamespace(stopped=False)
         self.service._initialized = True
         self.service._mark_runtime_restart()
         self.service._probe_browser_runtime = AsyncMock(return_value=True)
-        self.service._ensure_resident_tab = AsyncMock(return_value=("slot-1", resident_info))
-        self.service._restart_browser_for_project_unlocked = AsyncMock(return_value=True)
+        self.service._ensure_resident_tab = AsyncMock(
+            return_value=("slot-1", resident_info)
+        )
+        self.service._restart_browser_for_project_unlocked = AsyncMock(
+            return_value=True
+        )
 
         result = await self.service._restart_browser_for_project("project-1")
 
@@ -158,7 +178,9 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
     async def test_wait_for_recaptcha_raises_on_runtime_disconnect(self):
         tab = _ClosableFakeTab()
         runtime_error = ConnectionRefusedError(1225, "远程计算机拒绝网络连接。")
-        self.service._inject_recaptcha_bootstrap_script = AsyncMock(return_value="remote")
+        self.service._inject_recaptcha_bootstrap_script = AsyncMock(
+            return_value="remote"
+        )
         self.service._tab_evaluate = AsyncMock(side_effect=runtime_error)
 
         with self.assertRaises(ConnectionRefusedError):
@@ -181,7 +203,9 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
         self.service._resident_tabs["slot-1"] = resident_info
         self.service._project_resident_affinity["project-1"] = "slot-1"
         self.service._token_resident_affinity["1"] = "slot-1"
-        self.service._maybe_execute_pending_fresh_profile_restart = AsyncMock(return_value=False)
+        self.service._maybe_execute_pending_fresh_profile_restart = AsyncMock(
+            return_value=False
+        )
         self.service._restart_browser_for_project = AsyncMock(return_value=True)
 
         await self.service.report_flow_error(
@@ -198,11 +222,15 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
         self.service._restart_browser_for_project.assert_not_awaited()
         self.service._maybe_execute_pending_fresh_profile_restart.assert_awaited_once()
 
-    async def test_pending_fresh_restart_task_is_preserved_during_runtime_shutdown(self):
+    async def test_pending_fresh_restart_task_is_preserved_during_runtime_shutdown(
+        self,
+    ):
         async def runner():
             self.service._fresh_profile_restart_task = asyncio.current_task()
             await self.service._cancel_background_runtime_tasks(reason="unit_test")
-            self.assertIs(self.service._fresh_profile_restart_task, asyncio.current_task())
+            self.assertIs(
+                self.service._fresh_profile_restart_task, asyncio.current_task()
+            )
 
         import asyncio
 
@@ -244,7 +272,9 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
             events.append("solve_resident")
             return "token-1"
 
-        self.service._restart_browser_for_project_unlocked = AsyncMock(side_effect=restart_unlocked)
+        self.service._restart_browser_for_project_unlocked = AsyncMock(
+            side_effect=restart_unlocked
+        )
         self.service.initialize = AsyncMock(side_effect=initialize)
         self.service._ensure_resident_tab = AsyncMock(side_effect=ensure_resident)
         self.service._ensure_resident_token_binding = AsyncMock(return_value=True)
@@ -257,7 +287,9 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual((token, slot_id), ("token-1", "slot-1"))
-        self.assertEqual(events, ["fresh_restart", "initialize", "ensure_resident", "solve_resident"])
+        self.assertEqual(
+            events, ["fresh_restart", "initialize", "ensure_resident", "solve_resident"]
+        )
         self.assertFalse(self.service._fresh_profile_restart_pending)
         self.assertIsNone(self.service._fresh_profile_restart_task)
 
@@ -277,10 +309,12 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(restart_task())
         self.service._fresh_profile_restart_task = task
 
-        result = await self.service._wait_for_pending_fresh_profile_restart_before_solve(
+        result = (
+            await self.service._wait_for_pending_fresh_profile_restart_before_solve(
             "project-1",
             token_id=1,
             source="unit_test",
+        )
         )
 
         self.assertTrue(result)
@@ -296,9 +330,13 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("behavior", profile)
         self.assertIn("visualViewport", profile["window"])
         self.assertIn("supportedExtensions", profile["graphics"])
-        self.assertIn("WEBGL_debug_renderer_info", profile["graphics"]["supportedExtensions"])
+        self.assertIn(
+            "WEBGL_debug_renderer_info", profile["graphics"]["supportedExtensions"]
+        )
 
-        source = self.service._build_tab_fingerprint_spoof_source(types.SimpleNamespace(target_id="unit-tab"))
+        source = self.service._build_tab_fingerprint_spoof_source(
+            types.SimpleNamespace(target_id="unit-tab")
+        )
         for marker in (
             "ensureWebGpuEnvironment",
             "ensureMatchMediaEnvironment",
@@ -331,8 +369,12 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pool_dispatch_prefers_cold_idle_worker_over_busy_live_worker(self):
         pool = _PersonalBrowserPoolService()
-        live_worker = BrowserCaptchaService(browser_instance_id=1, max_resident_tabs_override=5)
-        cold_worker = BrowserCaptchaService(browser_instance_id=2, max_resident_tabs_override=5)
+        live_worker = BrowserCaptchaService(
+            browser_instance_id=1, max_resident_tabs_override=5
+        )
+        cold_worker = BrowserCaptchaService(
+            browser_instance_id=2, max_resident_tabs_override=5
+        )
         live_worker._initialized = True
         live_worker.browser = types.SimpleNamespace(stopped=False)
         pool._workers = [live_worker, cold_worker]

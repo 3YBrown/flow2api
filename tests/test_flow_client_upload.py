@@ -5,128 +5,51 @@ from src.services.flow_client import FlowClient
 
 
 JPEG_BYTES = b"\xff\xd8\xff" + b"0" * 16
+PROJECT_ID = "01234567-89ab-cdef-0123-456789abcdef"
+MEDIA_ID = "11234567-89ab-cdef-0123-456789abcdef"
 
 
 class FlowClientUploadImageTests(unittest.IsolatedAsyncioTestCase):
-    async def test_project_scoped_upload_uses_new_endpoint_with_project_id(self):
+    async def test_upload_uses_current_frontend_rpc(self):
         client = FlowClient(proxy_manager=None)
-
-        request_calls = []
-
-        async def fake_make_request(**kwargs):
-            request_calls.append(kwargs)
-            return {
-                "media": {
-                    "name": "new-media-id",
-                }
-            }
-
-        client._make_request = AsyncMock(side_effect=fake_make_request)
-
-        media_id = await client.upload_image(
-            at="test-at",
-            image_bytes=JPEG_BYTES,
-            aspect_ratio="IMAGE_ASPECT_RATIO_LANDSCAPE",
-            project_id="project-123",
-        )
-
-        self.assertEqual(media_id, "new-media-id")
-        self.assertEqual(len(request_calls), 1)
-        self.assertTrue(request_calls[0]["url"].endswith("/flow/uploadImage"))
-        self.assertEqual(
-            request_calls[0]["json_data"]["clientContext"]["projectId"],
-            "project-123",
-        )
-        self.assertIn("sessionId", request_calls[0]["json_data"]["clientContext"])
-
-    async def test_project_scoped_upload_accepts_media_list_response(self):
-        client = FlowClient(proxy_manager=None)
-
-        request_calls = []
-
-        async def fake_make_request(**kwargs):
-            request_calls.append(kwargs)
-            return {
-                "media": [
-                    {
-                        "name": "new-media-id",
-                        "projectId": "project-123",
-                    }
+        client._get_recaptcha_token = AsyncMock(return_value=("captcha-token", None))
+        client._call_flow_frontend_rpc = AsyncMock(
+            return_value=[
+                [
+                    MEDIA_ID,
+                    PROJECT_ID,
+                    f"https://flow-content.google/image/{MEDIA_ID}?Signature=1",
                 ]
-            }
-
-        client._make_request = AsyncMock(side_effect=fake_make_request)
+            ]
+        )
+        client._make_request = AsyncMock()
 
         media_id = await client.upload_image(
-            at="test-at",
+            at="frontend-cookie",
             image_bytes=JPEG_BYTES,
             aspect_ratio="IMAGE_ASPECT_RATIO_LANDSCAPE",
-            project_id="project-123",
+            project_id=PROJECT_ID,
+            google_cookies="SID=session-cookie",
         )
 
-        self.assertEqual(media_id, "new-media-id")
-        self.assertEqual(len(request_calls), 1)
-        self.assertTrue(request_calls[0]["url"].endswith("/flow/uploadImage"))
+        self.assertEqual(media_id, MEDIA_ID)
+        client._make_request.assert_not_awaited()
+        request = client._call_flow_frontend_rpc.await_args.kwargs
+        self.assertEqual(request["rpc_id"], "maseQ")
+        self.assertEqual(request["argument"][0][5], PROJECT_ID)
+        self.assertEqual(request["argument"][0][10], ["captcha-token", 1])
+        self.assertEqual(request["argument"][2], "image/jpeg")
 
-    async def test_project_scoped_upload_does_not_fallback_to_legacy_endpoint(self):
+    async def test_upload_requires_project_id(self):
         client = FlowClient(proxy_manager=None)
 
-        request_calls = []
-
-        async def fake_make_request(**kwargs):
-            request_calls.append(kwargs)
-            if kwargs["url"].endswith("/flow/uploadImage"):
-                raise RuntimeError("HTTP 500: upstream failed")
-            self.fail("带 project_id 的上传不应回退到 legacy 接口")
-
-        client._make_request = AsyncMock(side_effect=fake_make_request)
-
-        with self.assertRaisesRegex(RuntimeError, "legacy :uploadUserImage fallback is disabled"):
+        with self.assertRaisesRegex(ValueError, "requires project_id"):
             await client.upload_image(
-                at="test-at",
+                at="frontend-cookie",
                 image_bytes=JPEG_BYTES,
-                aspect_ratio="IMAGE_ASPECT_RATIO_LANDSCAPE",
-                project_id="project-123",
+                project_id=None,
+                google_cookies="SID=session-cookie",
             )
-
-        self.assertEqual(len(request_calls), 1)
-        self.assertEqual(
-            request_calls[0]["json_data"]["clientContext"]["projectId"],
-            "project-123",
-        )
-
-    async def test_upload_without_project_id_keeps_legacy_fallback(self):
-        client = FlowClient(proxy_manager=None)
-
-        request_calls = []
-
-        async def fake_make_request(**kwargs):
-            request_calls.append(kwargs)
-            if kwargs["url"].endswith("/flow/uploadImage"):
-                raise RuntimeError("HTTP 500: upstream failed")
-            if kwargs["url"].endswith(":uploadUserImage"):
-                return {
-                    "mediaGenerationId": {
-                        "mediaGenerationId": "legacy-media-id",
-                    }
-                }
-            self.fail(f"Unexpected url: {kwargs['url']}")
-
-        client._make_request = AsyncMock(side_effect=fake_make_request)
-
-        media_id = await client.upload_image(
-            at="test-at",
-            image_bytes=JPEG_BYTES,
-            aspect_ratio="IMAGE_ASPECT_RATIO_LANDSCAPE",
-            project_id=None,
-        )
-
-        self.assertEqual(media_id, "legacy-media-id")
-        self.assertEqual(len(request_calls), 2)
-        self.assertNotIn(
-            "projectId",
-            request_calls[1]["json_data"]["clientContext"],
-        )
 
 
 if __name__ == "__main__":

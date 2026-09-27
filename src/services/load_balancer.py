@@ -1,4 +1,5 @@
 """Load balancing module for Flow2API"""
+
 import asyncio
 import random
 from typing import Optional, Dict
@@ -17,16 +18,24 @@ from ..core.logger import debug_logger
 class LoadBalancer:
     """Token load balancer with load-aware selection"""
 
-    def __init__(self, token_manager, concurrency_manager: Optional[ConcurrencyManager] = None):
+    def __init__(
+        self, token_manager, concurrency_manager: Optional[ConcurrencyManager] = None
+    ):
         self.token_manager = token_manager
         self.concurrency_manager = concurrency_manager
         self._image_pending: Dict[int, int] = {}
         self._video_pending: Dict[int, int] = {}
         self._pending_lock = asyncio.Lock()
-        self._round_robin_state: Dict[str, Optional[int]] = {"image": None, "video": None, "default": None}
+        self._round_robin_state: Dict[str, Optional[int]] = {
+            "image": None,
+            "video": None,
+            "default": None,
+        }
         self._rr_lock = asyncio.Lock()
 
-    async def _get_pending_count(self, token_id: int, for_image_generation: bool, for_video_generation: bool) -> int:
+    async def _get_pending_count(
+        self, token_id: int, for_image_generation: bool, for_video_generation: bool
+    ) -> int:
         async with self._pending_lock:
             if for_image_generation:
                 return max(0, int(self._image_pending.get(token_id, 0)))
@@ -34,14 +43,25 @@ class LoadBalancer:
                 return max(0, int(self._video_pending.get(token_id, 0)))
             return 0
 
-    async def _add_pending(self, token_id: int, for_image_generation: bool, for_video_generation: bool):
+    async def _add_pending(
+        self, token_id: int, for_image_generation: bool, for_video_generation: bool
+    ):
         async with self._pending_lock:
             if for_image_generation:
-                self._image_pending[token_id] = max(0, int(self._image_pending.get(token_id, 0))) + 1
+                self._image_pending[token_id] = (
+                    max(0, int(self._image_pending.get(token_id, 0))) + 1
+                )
             elif for_video_generation:
-                self._video_pending[token_id] = max(0, int(self._video_pending.get(token_id, 0))) + 1
+                self._video_pending[token_id] = (
+                    max(0, int(self._video_pending.get(token_id, 0))) + 1
+                )
 
-    async def release_pending(self, token_id: int, for_image_generation: bool = False, for_video_generation: bool = False):
+    async def release_pending(
+        self,
+        token_id: int,
+        for_image_generation: bool = False,
+        for_video_generation: bool = False,
+    ):
         async with self._pending_lock:
             if for_image_generation:
                 current = max(0, int(self._image_pending.get(token_id, 0)))
@@ -56,7 +76,9 @@ class LoadBalancer:
                 else:
                     self._video_pending[token_id] = current - 1
 
-    async def _get_token_load(self, token_id: int, for_image_generation: bool, for_video_generation: bool) -> tuple[int, Optional[int]]:
+    async def _get_token_load(
+        self, token_id: int, for_image_generation: bool, for_video_generation: bool
+    ) -> tuple[int, Optional[int]]:
         """获取 token 当前负载。
 
         Returns:
@@ -86,7 +108,9 @@ class LoadBalancer:
 
         return 0, None
 
-    async def _reserve_slot(self, token_id: int, for_image_generation: bool, for_video_generation: bool) -> bool:
+    async def _reserve_slot(
+        self, token_id: int, for_image_generation: bool, for_video_generation: bool
+    ) -> bool:
         """尝试为当前 token 预占一个生成槽位。"""
         if not self.concurrency_manager:
             return True
@@ -99,7 +123,9 @@ class LoadBalancer:
 
         return True
 
-    async def _select_round_robin(self, tokens: list[dict], scenario: str) -> Optional[dict]:
+    async def _select_round_robin(
+        self, tokens: list[dict], scenario: str
+    ) -> Optional[dict]:
         """Select candidate in round-robin order for the given scenario."""
         if not tokens:
             return None
@@ -125,7 +151,9 @@ class LoadBalancer:
         try:
             from .browser_captcha_extension import ExtensionCaptchaService
 
-            service = await ExtensionCaptchaService.get_instance(getattr(self.token_manager, "db", None))
+            service = await ExtensionCaptchaService.get_instance(
+                getattr(self.token_manager, "db", None)
+            )
             has_connection, route_key = await service.has_connection_for_token(token.id)
             if has_connection:
                 return True, ""
@@ -171,7 +199,9 @@ class LoadBalancer:
         )
 
         active_tokens = await self.token_manager.get_active_tokens()
-        debug_logger.log_info(f"[LOAD_BALANCER] 获取到 {len(active_tokens)} 个活跃Token")
+        debug_logger.log_info(
+            f"[LOAD_BALANCER] 获取到 {len(active_tokens)} 个活跃Token"
+        )
 
         if not active_tokens:
             debug_logger.log_info(f"[LOAD_BALANCER] ❌ 没有活跃的Token")
@@ -184,7 +214,9 @@ class LoadBalancer:
         for token in active_tokens:
             normalized_tier = normalize_user_paygate_tier(token.user_paygate_tier)
             if model and not supports_model_for_tier(model, normalized_tier):
-                filtered_reasons[token.id] = '账号等级不足，需要 ' + get_paygate_tier_label(required_tier)
+                filtered_reasons[token.id] = (
+                    "账号等级不足，需要 " + get_paygate_tier_label(required_tier)
+                )
                 continue
             if for_image_generation:
                 if not token.image_enabled:
@@ -225,15 +257,17 @@ class LoadBalancer:
             inflight, remaining = await self._get_token_load(
                 token.id,
                 for_image_generation=for_image_generation,
-                for_video_generation=for_video_generation
+                for_video_generation=for_video_generation,
             )
-            available_tokens.append({
+            available_tokens.append(
+                {
                 "token": token,
                 "inflight": inflight,
                 "remaining": remaining,
                 "needs_refresh": self.token_manager.needs_at_refresh(token),
-                "random": random.random()
-            })
+                    "random": random.random(),
+                }
+            )
 
         if filtered_reasons:
             debug_logger.log_info(f"[LOAD_BALANCER] 已过滤Token:")
@@ -241,7 +275,9 @@ class LoadBalancer:
                 debug_logger.log_info(f"[LOAD_BALANCER]   - Token {token_id}: {reason}")
 
         if not available_tokens:
-            debug_logger.log_info(f"[LOAD_BALANCER] ❌ 没有可用的Token (图片生成={for_image_generation}, 视频生成={for_video_generation})")
+            debug_logger.log_info(
+                f"[LOAD_BALANCER] ❌ 没有可用的Token (图片生成={for_image_generation}, 视频生成={for_video_generation})"
+            )
             return None
 
         # 最低 in-flight 优先；有并发上限时，剩余槽位更多的 token 优先；最后随机打散
@@ -258,7 +294,10 @@ class LoadBalancer:
             if first_candidate is not None:
                 ordered_candidates.append(first_candidate)
                 ordered_candidates.extend(
-                    item for item in sorted(available_tokens, key=lambda item: item["token"].id or 0)
+                    item
+                    for item in sorted(
+                        available_tokens, key=lambda item: item["token"].id or 0
+                    )
                     if item["token"].id != first_candidate["token"].id
                 )
             available_tokens = ordered_candidates
@@ -269,12 +308,16 @@ class LoadBalancer:
                     item["inflight"],
                     0 if item["remaining"] is None else 1,
                     -(item["remaining"] or 0),
-                    item["random"]
+                    item["random"],
                 )
             )
 
-        ready_candidates = [item for item in available_tokens if not item["needs_refresh"]]
-        refresh_candidates = [item for item in available_tokens if item["needs_refresh"]]
+        ready_candidates = [
+            item for item in available_tokens if not item["needs_refresh"]
+        ]
+        refresh_candidates = [
+            item for item in available_tokens if item["needs_refresh"]
+        ]
         if ready_candidates and refresh_candidates:
             available_tokens = ready_candidates + refresh_candidates
 
@@ -295,15 +338,23 @@ class LoadBalancer:
 
             token = await self.token_manager.ensure_valid_token(token)
             if not token:
-                debug_logger.log_info(f"[LOAD_BALANCER] 跳过 Token {token_id}: AT无效或已过期")
+                debug_logger.log_info(
+                    f"[LOAD_BALANCER] 跳过 Token {token_id}: AT无效或已过期"
+                )
                 continue
 
-            if reserve and not await self._reserve_slot(token.id, for_image_generation, for_video_generation):
-                debug_logger.log_info(f"[LOAD_BALANCER] 跳过 Token {token.id}: 预占槽位失败")
+            if reserve and not await self._reserve_slot(
+                token.id, for_image_generation, for_video_generation
+            ):
+                debug_logger.log_info(
+                    f"[LOAD_BALANCER] 跳过 Token {token.id}: 预占槽位失败"
+                )
                 continue
 
             if track_pending:
-                await self._add_pending(token.id, for_image_generation, for_video_generation)
+                await self._add_pending(
+                    token.id, for_image_generation, for_video_generation
+                )
 
             debug_logger.log_info(
                 f"[LOAD_BALANCER] ✅ 已选择Token {token.id} ({token.email}) - "
@@ -311,7 +362,9 @@ class LoadBalancer:
             )
             return token
 
-        debug_logger.log_info(f"[LOAD_BALANCER] ❌ 候选Token均不可用 (图片生成={for_image_generation}, 视频生成={for_video_generation})")
+        debug_logger.log_info(
+            f"[LOAD_BALANCER] ❌ 候选Token均不可用 (图片生成={for_image_generation}, 视频生成={for_video_generation})"
+        )
         return None
 
     async def get_unavailable_reason(

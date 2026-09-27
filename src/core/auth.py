@@ -9,6 +9,7 @@ from .config import config
 security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
 
+
 class AuthManager:
     """Authentication manager"""
 
@@ -33,7 +34,10 @@ class AuthManager:
         """Verify password"""
         return bcrypt.checkpw(password.encode(), hashed.encode())
 
-async def verify_api_key_header(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
+
+async def verify_api_key_header(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+) -> str:
     """Verify API key from Authorization header"""
     api_key = credentials.credentials
     if not AuthManager.verify_api_key(api_key):

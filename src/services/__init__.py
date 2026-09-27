@@ -13,5 +13,5 @@ __all__ = [
     "LoadBalancer",
     "ConcurrencyManager",
     "TokenManager",
-    "GenerationHandler"
+    "GenerationHandler",
 ]

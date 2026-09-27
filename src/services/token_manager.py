@@ -1,5 +1,7 @@
 """Token manager for Flow2API with AT auto-refresh"""
+
 import asyncio
+import hashlib
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, List
@@ -49,7 +51,9 @@ class TokenManager:
 
     def _sort_projects(self, projects: List[Project]) -> List[Project]:
         """Sort projects in a stable order for round-robin selection."""
-        return sorted(projects, key=lambda project: (project.id or 0, project.project_id))
+        return sorted(
+            projects, key=lambda project: (project.id or 0, project.project_id)
+        )
 
     def _normalize_project_name_base(self, project_name: Optional[str] = None) -> str:
         """Normalize a project base name for pooled creation."""
@@ -61,7 +65,9 @@ class TokenManager:
             return raw_name
         return datetime.now().strftime("%b %d - %H:%M")
 
-    def _build_project_name(self, pool_index: int, base_name: Optional[str] = None) -> str:
+    def _build_project_name(
+        self, pool_index: int, base_name: Optional[str] = None
+    ) -> str:
         """Build a project name for the pool."""
         normalized_base = self._normalize_project_name_base(base_name)
         return f"{normalized_base} P{pool_index}"
@@ -105,7 +111,9 @@ class TokenManager:
         self._at_validation_cache.pop(int(token_id), None)
 
     def _mark_at_valid(self, token_id: int, ttl_seconds: int = 300) -> None:
-        self._at_validation_cache[int(token_id)] = time.monotonic() + max(30, int(ttl_seconds or 300))
+        self._at_validation_cache[int(token_id)] = time.monotonic() + max(
+            30, int(ttl_seconds or 300)
+        )
 
     def _has_recent_at_validation(self, token_id: int) -> bool:
         expires_at = float(self._at_validation_cache.get(int(token_id), 0.0) or 0.0)
@@ -127,10 +135,24 @@ class TokenManager:
             self.flow_client._set_request_fingerprint(previous_fingerprint)
 
     async def _st_to_at_for_token(self, token: Token, st: str) -> Dict[str, Any]:
-        return await self._flow_call_for_token(token, lambda: self.flow_client.st_to_at(st))
+        return await self._flow_call_for_token(
+            token,
+            lambda: self.flow_client.st_to_at(
+                st,
+                google_cookies=token.google_cookies,
+                token_id=token.id,
+            ),
+        )
 
     async def _get_credits_for_token(self, token: Token, at: str) -> Dict[str, Any]:
-        return await self._flow_call_for_token(token, lambda: self.flow_client.get_credits(at))
+        return await self._flow_call_for_token(
+            token,
+            lambda: self.flow_client.get_credits(
+                at,
+                google_cookies=token.google_cookies,
+                token_id=token.id,
+            ),
+        )
 
     async def get_personal_warmup_project_ids(
         self,
@@ -157,7 +179,11 @@ class TokenManager:
             if current_project_id:
                 candidate_ids.append(current_project_id)
 
-            projects = [project for project in await self.db.get_projects_by_token(token.id) if project.is_active]
+            projects = [
+                project
+                for project in await self.db.get_projects_by_token(token.id)
+                if project.is_active
+            ]
             for project in self._sort_projects(projects):
                 project_id = str(project.project_id or "").strip()
                 if project_id and project_id not in candidate_ids:
@@ -173,10 +199,16 @@ class TokenManager:
 
         return warmup_ids
 
-    async def _create_project_for_token(self, token: Token, pool_index: int, base_name: Optional[str] = None) -> Project:
+    async def _create_project_for_token(
+        self, token: Token, pool_index: int, base_name: Optional[str] = None
+    ) -> Project:
         """Create a new pooled project for a token and persist it."""
         project_name = self._build_project_name(pool_index, base_name)
-        project_id = await self.flow_client.create_project(token.st, project_name)
+        project_id = await self.flow_client.create_project(
+            token.st,
+            project_name,
+            google_cookies=token.google_cookies,
+        )
         debug_logger.log_info(
             f"[PROJECT] Created pooled project for token {token.id}: {project_name} ({project_id})"
         )
@@ -249,16 +281,21 @@ class TokenManager:
         if config.captcha_method == "personal" and project_ids:
             try:
                 from .browser_captcha_personal import BrowserCaptchaService
+
                 service = await BrowserCaptchaService.get_instance(self.db)
                 for project_id in project_ids:
                     await service.stop_resident_mode(project_id)
             except Exception as e:
-                debug_logger.log_warning(f"[DELETE_TOKEN] 清理 personal 浏览器状态失败: {e}")
+                debug_logger.log_warning(
+                    f"[DELETE_TOKEN] 清理 personal 浏览器状态失败: {e}"
+                )
 
     async def enable_token(self, token_id: int):
         """Enable a token and reset error count"""
         # Enable the token
-        await self.db.update_token(token_id, is_active=True, ban_reason=None, banned_at=None)
+        await self.db.update_token(
+            token_id, is_active=True, ban_reason=None, banned_at=None
+        )
         # Reset error count when enabling (only reset total error_count, keep today_error_count)
         await self.db.reset_error_count(token_id)
 
@@ -289,29 +326,45 @@ class TokenManager:
         refresh_interval_minutes: int = 120,
     ) -> Token:
         """Add a new token and prepare its pooled projects."""
-        existing_token = await self.db.get_token_by_st(st)
+        if not st and google_cookies:
+            cookie_hash = hashlib.sha256(google_cookies.encode("utf-8")).hexdigest()[
+                :32
+            ]
+            st = f"frontend-{cookie_hash}"
+        existing_token = await self.db.get_token_by_st(st) if st else None
         if existing_token:
             raise ValueError(f"Token ??????: {existing_token.email}?")
 
         debug_logger.log_info(f"[ADD_TOKEN] Converting ST to AT...")
         try:
-            result = await self.flow_client.st_to_at(st)
+            result = await self.flow_client.st_to_at(
+                st,
+                google_cookies=google_cookies,
+            )
             at = result["access_token"]
             expires = result.get("expires")
             user_info = result.get("user", {})
-            email = user_info.get("email", "")
+            email = user_info.get("email", "") or str(login_account or "").strip()
+            if not email and google_cookies:
+                account_hash = hashlib.sha256(
+                    google_cookies.encode("utf-8")
+                ).hexdigest()[:16]
+                email = f"account-{account_hash}@flow.local"
             name = user_info.get("name", email.split("@")[0] if email else "")
             at_expires = None
             if expires:
                 try:
-                    at_expires = datetime.fromisoformat(expires.replace('Z', '+00:00'))
+                    at_expires = datetime.fromisoformat(expires.replace("Z", "+00:00"))
                 except Exception:
                     pass
         except Exception as e:
             raise ValueError(f"ST?AT??: {str(e)}")
 
         try:
-            credits_result = await self.flow_client.get_credits(at)
+            credits_result = await self.flow_client.get_credits(
+                at,
+                google_cookies=google_cookies,
+            )
             credits = credits_result.get("credits", 0)
             user_paygate_tier = credits_result.get("userPaygateTier")
         except Exception:
@@ -324,24 +377,36 @@ class TokenManager:
 
         if project_id:
             first_project_name = self._build_project_name(1, base_project_name)
-            debug_logger.log_info(f"[ADD_TOKEN] Using provided project_id as pooled project #1: {project_id}")
-            pooled_projects.append(Project(
+            debug_logger.log_info(
+                f"[ADD_TOKEN] Using provided project_id as pooled project #1: {project_id}"
+            )
+            pooled_projects.append(
+                Project(
                 project_id=project_id,
                 token_id=0,
                 project_name=first_project_name,
-                tool_name="PINHOLE"
-            ))
+                    tool_name="PINHOLE",
+                )
+            )
         else:
             try:
                 first_project_name = self._build_project_name(1, base_project_name)
-                first_project_id = await self.flow_client.create_project(st, first_project_name)
-                debug_logger.log_info(f"[ADD_TOKEN] Created pooled project #1: {first_project_name} (ID: {first_project_id})")
-                pooled_projects.append(Project(
+                first_project_id = await self.flow_client.create_project(
+                    st,
+                    first_project_name,
+                    google_cookies=google_cookies,
+                )
+                debug_logger.log_info(
+                    f"[ADD_TOKEN] Created pooled project #1: {first_project_name} (ID: {first_project_id})"
+                )
+                pooled_projects.append(
+                    Project(
                     project_id=first_project_id,
                     token_id=0,
                     project_name=first_project_name,
-                    tool_name="PINHOLE"
-                ))
+                        tool_name="PINHOLE",
+                    )
+                )
             except Exception as e:
                 raise ValueError(f"??????: {str(e)}")
 
@@ -369,7 +434,9 @@ class TokenManager:
             login_password=login_password or "",
             proxy_url=self._normalize_token_proxy_url(proxy_url),
             auto_refresh_enabled=bool(auto_refresh_enabled),
-            refresh_interval_minutes=self._normalize_refresh_interval(refresh_interval_minutes),
+            refresh_interval_minutes=self._normalize_refresh_interval(
+                refresh_interval_minutes
+            ),
         )
 
         token_id = await self.db.add_token(token)
@@ -379,13 +446,16 @@ class TokenManager:
         pooled_projects[0].id = await self.db.add_project(pooled_projects[0])
 
         while len(pooled_projects) < project_pool_size:
-            new_project = await self._create_project_for_token(token, len(pooled_projects) + 1, base_project_name)
+            new_project = await self._create_project_for_token(
+                token, len(pooled_projects) + 1, base_project_name
+            )
             pooled_projects.append(new_project)
 
         debug_logger.log_info(
             f"[ADD_TOKEN] Token added successfully (ID: {token_id}, Email: {email}, pooled_projects={len(pooled_projects)})"
         )
         return token
+
     async def update_token(
         self,
         token_id: int,
@@ -441,7 +511,9 @@ class TokenManager:
         if extension_route_key is not None:
             update_fields["extension_route_key"] = extension_route_key
         if protocol_mode is not None:
-            update_fields["protocol_mode"] = self._normalize_protocol_mode(protocol_mode)
+            update_fields["protocol_mode"] = self._normalize_protocol_mode(
+                protocol_mode
+            )
         if google_cookies is not None:
             update_fields["google_cookies"] = google_cookies.strip()
         if login_account is not None:
@@ -453,12 +525,16 @@ class TokenManager:
         if auto_refresh_enabled is not None:
             update_fields["auto_refresh_enabled"] = bool(auto_refresh_enabled)
         if refresh_interval_minutes is not None:
-            update_fields["refresh_interval_minutes"] = self._normalize_refresh_interval(refresh_interval_minutes)
+            update_fields["refresh_interval_minutes"] = (
+                self._normalize_refresh_interval(refresh_interval_minutes)
+            )
 
         # 检查token是否因429被禁用，如果是且未过期，则清空429状态
         token = await self.db.get_token(token_id)
         if credential_updated and token and not token.is_active:
-            debug_logger.log_info(f"[UPDATE_TOKEN] Token {token_id} 已更新凭证，自动恢复为启用状态")
+            debug_logger.log_info(
+                f"[UPDATE_TOKEN] Token {token_id} 已更新凭证，自动恢复为启用状态"
+            )
             update_fields["is_active"] = True
             update_fields["ban_reason"] = None
             update_fields["banned_at"] = None
@@ -476,7 +552,9 @@ class TokenManager:
 
             # 如果未过期，清空429禁用状态
             if not is_expired:
-                debug_logger.log_info(f"[UPDATE_TOKEN] Token {token_id} 编辑保存，清空429禁用状态")
+                debug_logger.log_info(
+                    f"[UPDATE_TOKEN] Token {token_id} 编辑保存，清空429禁用状态"
+                )
                 update_fields["ban_reason"] = None
                 update_fields["banned_at"] = None
 
@@ -494,7 +572,9 @@ class TokenManager:
             return True
 
         if not token.at_expires:
-            debug_logger.log_info(f"[AT_CHECK] Token {token.id}: AT过期时间未知,尝试刷新")
+            debug_logger.log_info(
+                f"[AT_CHECK] Token {token.id}: AT过期时间未知,尝试刷新"
+            )
             return True
 
         now = datetime.now(timezone.utc)
@@ -553,13 +633,16 @@ class TokenManager:
             True if AT is valid or refreshed successfully
             False if AT cannot be refreshed
         """
-        token_obj = token if token and token.id == token_id else await self.db.get_token(token_id)
+        token_obj = (
+            token
+            if token and token.id == token_id
+            else await self.db.get_token(token_id)
+        )
         if not token_obj:
             return False
 
         valid_token = await self.ensure_valid_token(token_obj)
         return valid_token is not None
-
 
     async def _refresh_at_inner(self, token_id: int) -> bool:
         """Perform exactly one real AT refresh attempt."""
@@ -577,16 +660,22 @@ class TokenManager:
             if result:
                 return True
 
-            debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: first AT refresh failed, trying ST refresh...")
+            debug_logger.log_info(
+                f"[AT_REFRESH] Token {token_id}: first AT refresh failed, trying ST refresh..."
+            )
             new_st = await self._try_refresh_st(token_id, token)
             if new_st:
-                debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: ST refreshed, retrying AT refresh...")
+                debug_logger.log_info(
+                    f"[AT_REFRESH] Token {token_id}: ST refreshed, retrying AT refresh..."
+                )
                 latest_token = await self.db.get_token(token_id) or token
                 result = await self._do_refresh_at(token_id, new_st, latest_token)
                 if result:
                     return True
 
-            debug_logger.log_error(f"[AT_REFRESH] Token {token_id}: all refresh attempts failed, disabling token")
+            debug_logger.log_error(
+                f"[AT_REFRESH] Token {token_id}: all refresh attempts failed, disabling token"
+            )
             await self.disable_token(token_id)
             self._clear_at_validation_cache(token_id)
             return False
@@ -609,7 +698,9 @@ class TokenManager:
         self._refresh_futures[token_id] = task
         return await task
 
-    async def _do_refresh_at(self, token_id: int, st: str, token: Optional[Token] = None) -> bool:
+    async def _do_refresh_at(
+        self, token_id: int, st: str, token: Optional[Token] = None
+    ) -> bool:
         """执行 AT 刷新的核心逻辑
 
         Args:
@@ -636,16 +727,14 @@ class TokenManager:
             new_at_expires = None
             if expires:
                 try:
-                    new_at_expires = datetime.fromisoformat(expires.replace('Z', '+00:00'))
+                    new_at_expires = datetime.fromisoformat(
+                        expires.replace("Z", "+00:00")
+                    )
                 except:
                     pass
 
             # 更新数据库
-            await self.db.update_token(
-                token_id,
-                at=new_at,
-                at_expires=new_at_expires
-            )
+            await self.db.update_token(token_id, at=new_at, at_expires=new_at_expires)
 
             debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: AT刷新成功")
             debug_logger.log_info(f"  - 新过期时间: {new_at_expires}")
@@ -663,32 +752,47 @@ class TokenManager:
                     user_paygate_tier=credits_result.get("userPaygateTier"),
                 )
                 self._mark_at_valid(token_id)
-                debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: AT 验证成功（余额: {credits_result.get('credits', 0)}）")
+                debug_logger.log_info(
+                    f"[AT_REFRESH] Token {token_id}: AT 验证成功（余额: {credits_result.get('credits', 0)}）"
+                )
                 record_token_refresh("at", "success")
                 return True
             except Exception as verify_err:
                 # AT 验证失败（可能返回 401），说明 ST 已过期
                 error_msg = str(verify_err)
                 if "401" in error_msg or "UNAUTHENTICATED" in error_msg:
-                    debug_logger.log_warning(f"[AT_REFRESH] Token {token_id}: AT 验证失败 (401)，ST 可能已过期")
+                    debug_logger.log_warning(
+                        f"[AT_REFRESH] Token {token_id}: AT 验证失败 (401)，ST 可能已过期"
+                    )
                     record_token_refresh("at", "failure")
                     return False
                 else:
                     # 其他错误（如网络问题），仍视为成功
-                    debug_logger.log_warning(f"[AT_REFRESH] Token {token_id}: AT 验证时发生非认证错误: {error_msg}")
+                    debug_logger.log_warning(
+                        f"[AT_REFRESH] Token {token_id}: AT 验证时发生非认证错误: {error_msg}"
+                    )
                     record_token_refresh("at", "success")
                     return True
 
         except Exception as e:
-            debug_logger.log_error(f"[AT_REFRESH] Token {token_id}: AT刷新失败 - {str(e)}")
+            debug_logger.log_error(
+                f"[AT_REFRESH] Token {token_id}: AT刷新失败 - {str(e)}"
+            )
             record_token_refresh("at", "failure")
             return False
 
-    async def _try_protocol_refresh_st(self, token_id: int, token: Token) -> Optional[str]:
-        if self._normalize_protocol_mode(getattr(token, "protocol_mode", "session")) != "protocol":
+    async def _try_protocol_refresh_st(
+        self, token_id: int, token: Token
+    ) -> Optional[str]:
+        if (
+            self._normalize_protocol_mode(getattr(token, "protocol_mode", "session"))
+            != "protocol"
+        ):
             return None
         if not (getattr(token, "google_cookies", "") or "").strip():
-            debug_logger.log_info(f"[ST_REFRESH] Token {token_id}: 未配置 Google Cookies，跳过协议刷新")
+            debug_logger.log_info(
+                f"[ST_REFRESH] Token {token_id}: 未配置 Google Cookies，跳过协议刷新"
+            )
             return None
 
         try:
@@ -708,7 +812,9 @@ class TokenManager:
                     last_st_refresh_at=datetime.now(timezone.utc),
                     last_st_refresh_result="success",
                 )
-                debug_logger.log_info(f"[ST_REFRESH] Token {token_id}: 协议刷新 ST 成功")
+                debug_logger.log_info(
+                    f"[ST_REFRESH] Token {token_id}: 协议刷新 ST 成功"
+                )
                 record_token_refresh("st", "success")
                 return new_st
 
@@ -718,7 +824,9 @@ class TokenManager:
                 last_st_refresh_at=datetime.now(timezone.utc),
                 last_st_refresh_result=error,
             )
-            debug_logger.log_warning(f"[ST_REFRESH] Token {token_id}: 协议刷新 ST 失败 - {error}")
+            debug_logger.log_warning(
+                f"[ST_REFRESH] Token {token_id}: 协议刷新 ST 失败 - {error}"
+            )
             record_token_refresh("st", "failure")
             return None
         except Exception as e:
@@ -727,7 +835,9 @@ class TokenManager:
                 last_st_refresh_at=datetime.now(timezone.utc),
                 last_st_refresh_result=str(e),
             )
-            debug_logger.log_error(f"[ST_REFRESH] Token {token_id}: 协议刷新 ST 异常 - {e}")
+            debug_logger.log_error(
+                f"[ST_REFRESH] Token {token_id}: 协议刷新 ST 异常 - {e}"
+            )
             record_token_refresh("st", "failure")
             return None
 
@@ -752,16 +862,23 @@ class TokenManager:
 
             # 仅在 personal 模式下支持 ST 自动刷新
             if config.captcha_method != "personal":
-                debug_logger.log_info(f"[ST_REFRESH] 非 personal 模式，跳过 ST 自动刷新")
+                debug_logger.log_info(
+                    f"[ST_REFRESH] 非 personal 模式，跳过 ST 自动刷新"
+                )
                 return None
 
             if not token.current_project_id:
-                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id} 没有 project_id，无法刷新 ST")
+                debug_logger.log_warning(
+                    f"[ST_REFRESH] Token {token_id} 没有 project_id，无法刷新 ST"
+                )
                 return None
 
-            debug_logger.log_info(f"[ST_REFRESH] Token {token_id}: 尝试通过浏览器刷新 ST...")
+            debug_logger.log_info(
+                f"[ST_REFRESH] Token {token_id}: 尝试通过浏览器刷新 ST..."
+            )
 
             from .browser_captcha_personal import BrowserCaptchaService
+
             service = await BrowserCaptchaService.get_instance(self.db)
 
             refresh_timeout_seconds = 45.0
@@ -783,16 +900,22 @@ class TokenManager:
                 record_token_refresh("st", "success")
                 return new_st
             elif new_st == token.st:
-                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id}: 获取到的 ST 与原 ST 相同，可能登录已失效")
+                debug_logger.log_warning(
+                    f"[ST_REFRESH] Token {token_id}: 获取到的 ST 与原 ST 相同，可能登录已失效"
+                )
                 record_token_refresh("st", "failure")
                 return None
             else:
-                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id}: 无法获取新 ST")
+                debug_logger.log_warning(
+                    f"[ST_REFRESH] Token {token_id}: 无法获取新 ST"
+                )
                 record_token_refresh("st", "failure")
                 return None
 
         except Exception as e:
-            debug_logger.log_error(f"[ST_REFRESH] Token {token_id}: 刷新 ST 失败 - {str(e)}")
+            debug_logger.log_error(
+                f"[ST_REFRESH] Token {token_id}: 刷新 ST 失败 - {str(e)}"
+            )
             record_token_refresh("st", "failure")
             return None
 
@@ -831,7 +954,9 @@ class TokenManager:
                     "last_st_refresh_at": now,
                     "last_st_refresh_result": "success",
                 }
-                user_info = session.get("user") if isinstance(session.get("user"), dict) else {}
+                user_info = (
+                    session.get("user") if isinstance(session.get("user"), dict) else {}
+                )
                 if user_info.get("email"):
                     updates["email"] = user_info.get("email")
                 if user_info.get("name"):
@@ -842,11 +967,15 @@ class TokenManager:
                     updates["credits"] = credits_result.get("credits", 0)
                     updates["user_paygate_tier"] = credits_result.get("userPaygateTier")
                 except Exception as e:
-                    debug_logger.log_warning(f"[PROTOCOL_REFRESH] Token {token_id}: 刷新余额失败 - {e}")
+                    debug_logger.log_warning(
+                        f"[PROTOCOL_REFRESH] Token {token_id}: 刷新余额失败 - {e}"
+                    )
 
                 await self.db.update_token(token_id, **updates)
                 record_token_refresh("at", "success")
-                debug_logger.log_info(f"[PROTOCOL_REFRESH] Token {token_id}: 协议刷新 ST/AT 成功")
+                debug_logger.log_info(
+                    f"[PROTOCOL_REFRESH] Token {token_id}: 协议刷新 ST/AT 成功"
+                )
             except Exception as e:
                 await self.db.update_token(
                     token_id,
@@ -855,7 +984,9 @@ class TokenManager:
                     last_st_refresh_result=str(e),
                 )
                 record_token_refresh("at", "failure")
-                debug_logger.log_error(f"[PROTOCOL_REFRESH] Token {token_id}: 协议 ST 转 AT 失败 - {e}")
+                debug_logger.log_error(
+                    f"[PROTOCOL_REFRESH] Token {token_id}: 协议 ST 转 AT 失败 - {e}"
+                )
 
     async def run_protocol_refresh_once(self) -> None:
         """Refresh protocol-mode tokens whose ST refresh interval is due."""
@@ -879,15 +1010,23 @@ class TokenManager:
                 if not (token.google_cookies or "").strip():
                     continue
 
-                interval_minutes = token.refresh_interval_minutes or refresh_config.refresh_interval_minutes or 120
+                interval_minutes = (
+                    token.refresh_interval_minutes
+                    or refresh_config.refresh_interval_minutes
+                    or 120
+                )
                 interval_minutes = self._normalize_refresh_interval(interval_minutes)
                 last_refresh = self._as_utc(token.last_st_refresh_at)
-                if last_refresh and now - last_refresh < timedelta(minutes=interval_minutes):
+                if last_refresh and now - last_refresh < timedelta(
+                    minutes=interval_minutes
+                ):
                     continue
 
                 await self._refresh_protocol_token(token, now)
             except Exception as e:
-                debug_logger.log_error(f"[PROTOCOL_REFRESH] Token {getattr(token, 'id', '?')}: 后台刷新异常 - {e}")
+                debug_logger.log_error(
+                    f"[PROTOCOL_REFRESH] Token {getattr(token, 'id', '?')}: 后台刷新异常 - {e}"
+                )
 
     async def _protocol_refresh_loop(self) -> None:
         while True:
@@ -902,7 +1041,9 @@ class TokenManager:
     def start_protocol_refresher(self) -> None:
         if self._protocol_refresher_task and not self._protocol_refresher_task.done():
             return
-        self._protocol_refresher_task = asyncio.create_task(self._protocol_refresh_loop())
+        self._protocol_refresher_task = asyncio.create_task(
+            self._protocol_refresh_loop()
+        )
 
     async def stop_protocol_refresher(self) -> None:
         task = self._protocol_refresher_task
@@ -929,13 +1070,19 @@ class TokenManager:
             if not token:
                 raise ValueError("Token not found")
 
-            projects = [project for project in await self.db.get_projects_by_token(token_id) if project.is_active]
+            projects = [
+                project
+                for project in await self.db.get_projects_by_token(token_id)
+                if project.is_active
+            ]
             projects = self._sort_projects(projects)
 
             try:
                 project_pool_size = self._get_project_pool_size()
                 while len(projects) < project_pool_size:
-                    new_project = await self._create_project_for_token(token, len(projects) + 1)
+                    new_project = await self._create_project_for_token(
+                        token, len(projects) + 1
+                    )
                     projects.append(new_project)
                     projects = self._sort_projects(projects)
 
@@ -988,12 +1135,14 @@ class TokenManager:
         Args:
             token_id: Token ID
         """
-        debug_logger.log_warning(f"[429_BAN] 禁用Token {token_id} (原因: 429 Rate Limit)")
+        debug_logger.log_warning(
+            f"[429_BAN] 禁用Token {token_id} (原因: 429 Rate Limit)"
+        )
         await self.db.update_token(
             token_id,
             is_active=False,
             ban_reason="429_rate_limit",
-            banned_at=datetime.now(timezone.utc)
+            banned_at=datetime.now(timezone.utc),
         )
 
     async def auto_unban_429_tokens(self):
@@ -1030,7 +1179,9 @@ class TokenManager:
 
                 # 如果已过期，跳过
                 if at_expires_aware <= now:
-                    debug_logger.log_info(f"[AUTO_UNBAN] Token {token.id} 已过期，跳过解禁")
+                    debug_logger.log_info(
+                        f"[AUTO_UNBAN] Token {token.id} 已过期，跳过解禁"
+                    )
                     continue
 
             # 确保banned_at时区一致
@@ -1047,10 +1198,7 @@ class TokenManager:
                     f"已过 {time_since_ban.total_seconds() / 3600:.1f} 小时)"
                 )
                 await self.db.update_token(
-                    token.id,
-                    is_active=True,
-                    ban_reason=None,
-                    banned_at=None
+                    token.id, is_active=True, ban_reason=None, banned_at=None
                 )
                 # 重置错误计数
                 await self.db.reset_error_count(token.id)
@@ -1073,7 +1221,11 @@ class TokenManager:
             return 0
 
         try:
-            result = await self.flow_client.get_credits(token.at)
+            result = await self.flow_client.get_credits(
+                token.at,
+                google_cookies=token.google_cookies,
+                token_id=token.id,
+            )
             credits = result.get("credits", 0)
             user_paygate_tier = result.get("userPaygateTier")
 
@@ -1086,5 +1238,7 @@ class TokenManager:
 
             return credits
         except Exception as e:
-            debug_logger.log_error(f"Failed to refresh credits for token {token_id}: {str(e)}")
+            debug_logger.log_error(
+                f"Failed to refresh credits for token {token_id}: {str(e)}"
+            )
             return 0

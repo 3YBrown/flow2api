@@ -120,7 +120,9 @@ ASPECT_RATIO_FLOAT_MAP = {
 }
 
 
-def _aspect_from_dimensions(width: int, height: int, *, video_mode: bool = False) -> Optional[str]:
+def _aspect_from_dimensions(
+    width: int, height: int, *, video_mode: bool = False
+) -> Optional[str]:
     if width <= 0 or height <= 0:
         return None
 
@@ -144,7 +146,11 @@ def _infer_aspect_ratio_from_images(
         return None
 
     source_bytes = next(
-        (bytes(item) for item in images if isinstance(item, (bytes, bytearray)) and item),
+        (
+            bytes(item)
+            for item in images
+            if isinstance(item, (bytes, bytearray)) and item
+        ),
         None,
     )
     if not source_bytes:
@@ -157,7 +163,9 @@ def _infer_aspect_ratio_from_images(
             normalized = ImageOps.exif_transpose(image)
             width, height = normalized.size
     except Exception as exc:
-        debug_logger.log_warning(f"[MODEL_RESOLVER] 参考图尺寸解析失败，跳过自动比例跟随: {exc}")
+        debug_logger.log_warning(
+            f"[MODEL_RESOLVER] 参考图尺寸解析失败，跳过自动比例跟随: {exc}"
+        )
         return None
 
     inferred = _aspect_from_dimensions(width, height, video_mode=video_mode)
@@ -414,6 +422,7 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
     Returns:
         (aspect_ratio, image_size) 归一化后的值
     """
+
     def _normalize_str(value: Any) -> Optional[str]:
         if not isinstance(value, str):
             return None
@@ -514,7 +523,9 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
             return mapped
         return None
 
-    def _apply_image_config(image_config: Any, aspect_ratio: Optional[str], image_size: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    def _apply_image_config(
+        image_config: Any, aspect_ratio: Optional[str], image_size: Optional[str]
+    ) -> Tuple[Optional[str], Optional[str]]:
         # 显式 aspectRatio/imageSize
         if not aspect_ratio:
             aspect_ratio = _normalize_aspect_ratio(
@@ -560,10 +571,14 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
         if not aspect_ratio:
             aspect_ratio = _aspect_from_openai_size(_read_value(gen_config, "size"))
         if not image_size:
-            image_size = _image_size_from_openai_quality(_read_value(gen_config, "quality"))
+            image_size = _image_size_from_openai_quality(
+                _read_value(gen_config, "quality")
+            )
 
     # 2) 顶层没有时，再尝试从 extra fields (Pydantic extra="allow") 中透传的 generationConfig
-    if (aspect_ratio is None or image_size is None) and hasattr(request, "__pydantic_extra__"):
+    if (aspect_ratio is None or image_size is None) and hasattr(
+        request, "__pydantic_extra__"
+    ):
         extra = request.__pydantic_extra__ or {}
         gen_config_raw = extra.get("generationConfig")
         if not isinstance(gen_config_raw, dict):
@@ -584,7 +599,8 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
 
             if aspect_ratio is None:
                 aspect_ratio = _normalize_aspect_ratio(
-                    gen_config_raw.get("aspectRatio") or gen_config_raw.get("aspect_ratio")
+                    gen_config_raw.get("aspectRatio")
+                    or gen_config_raw.get("aspect_ratio")
                 )
             if image_size is None:
                 image_size = _normalize_image_size(
@@ -594,10 +610,14 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
             if aspect_ratio is None:
                 aspect_ratio = _aspect_from_openai_size(gen_config_raw.get("size"))
             if image_size is None:
-                image_size = _image_size_from_openai_quality(gen_config_raw.get("quality"))
+                image_size = _image_size_from_openai_quality(
+                    gen_config_raw.get("quality")
+                )
 
     # 3) OpenAI 风格 size/quality（顶层 extra）兼容
-    if (aspect_ratio is None or image_size is None) and hasattr(request, "__pydantic_extra__"):
+    if (aspect_ratio is None or image_size is None) and hasattr(
+        request, "__pydantic_extra__"
+    ):
         extra = request.__pydantic_extra__ or {}
         if aspect_ratio is None:
             aspect_ratio = _aspect_from_openai_size(extra.get("size"))
@@ -606,9 +626,13 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
 
         # 一些上游可能直接传 aspect_ratio/image_size
         if aspect_ratio is None:
-            aspect_ratio = _normalize_aspect_ratio(extra.get("aspect_ratio") or extra.get("aspectRatio"))
+            aspect_ratio = _normalize_aspect_ratio(
+                extra.get("aspect_ratio") or extra.get("aspectRatio")
+            )
         if image_size is None:
-            image_size = _normalize_image_size(extra.get("image_size") or extra.get("imageSize"))
+            image_size = _normalize_image_size(
+                extra.get("image_size") or extra.get("imageSize")
+            )
 
     return aspect_ratio, image_size
 
@@ -693,7 +717,10 @@ def resolve_model_name(
         if not aspect_ratio or aspect_ratio not in ("landscape", "portrait"):
             aspect_ratio = "landscape"
 
-        if image_size in ("4k", "1080p") and f"{model}_{image_size}" in VIDEO_BASE_MODELS:
+        if (
+            image_size in ("4k", "1080p")
+            and f"{model}_{image_size}" in VIDEO_BASE_MODELS
+        ):
             model = f"{model}_{image_size}"
 
         orientation_map = VIDEO_BASE_MODELS[model]

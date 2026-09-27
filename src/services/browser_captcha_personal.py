@@ -3,6 +3,7 @@
 使用 nodriver (undetected-chromedriver 继任者) 实现反检测浏览器
 支持常驻模式：维护全局共享的常驻标签页池，即时生成 token
 """
+
 import asyncio
 import base64
 from collections import deque
@@ -28,6 +29,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Iterable
 from urllib.parse import urljoin, urlparse, urlunparse
 
+from curl_cffi.requests import AsyncSession
+
 from ..core.logger import debug_logger
 from ..core.config import config
 from .browser_cookie_utils import (
@@ -41,12 +44,14 @@ from .browser_cookie_utils import (
 TOKEN_POOL_SIZE_MAX = 500
 PERSONAL_POOL_MAX_TOTAL_RESIDENT_TABS = 50
 
+
 def resolve_effective_browser_count(value) -> int:
     try:
         current = max(1, min(20, int(value or 1)))
     except Exception:
         current = 1
     return current
+
 
 def resolve_effective_personal_max_resident_tabs(value) -> int:
     try:
@@ -55,10 +60,11 @@ def resolve_effective_personal_max_resident_tabs(value) -> int:
         current = 1
     return current
 
+
 PERSONAL_COOKIE_PREBIND_URL = "about:blank"
-PERSONAL_LABS_BOOTSTRAP_URL = "https://labs.google/fx/api/auth/providers"
+PERSONAL_LABS_BOOTSTRAP_URL = "https://flow.google.com/projects"
 PERSONAL_COOKIE_TARGET_URLS = (
-    "https://labs.google/",
+    "https://flow.google.com/",
     "https://www.google.com/",
     "https://www.recaptcha.net/",
 )
@@ -70,7 +76,9 @@ PERSONAL_GOOGLE_FAMILY_COOKIE_MIRROR_URLS = (
 # Personal browser writes Google session cookies here after each successful solve.
 _recaptcha_session_cookies: Optional[Dict[str, str]] = None
 _recaptcha_session_cookies_fetched_at: float = 0.0
-_RECAPTCHA_SESSION_COOKIES_TTL: float = 3600.0  # 1h 缓存周期，避免频繁导航打断 resident tab
+_RECAPTCHA_SESSION_COOKIES_TTL: float = (
+    3600.0  # 1h 缓存周期，避免频繁导航打断 resident tab
+)
 
 
 def get_cached_session_cookies() -> Optional[Dict[str, str]]:
@@ -78,7 +86,10 @@ def get_cached_session_cookies() -> Optional[Dict[str, str]]:
     global _recaptcha_session_cookies, _recaptcha_session_cookies_fetched_at
     if not _recaptcha_session_cookies:
         return None
-    if time.time() - _recaptcha_session_cookies_fetched_at > _RECAPTCHA_SESSION_COOKIES_TTL:
+    if (
+        time.time() - _recaptcha_session_cookies_fetched_at
+        > _RECAPTCHA_SESSION_COOKIES_TTL
+    ):
         return None
     return dict(_recaptcha_session_cookies)
 
@@ -89,7 +100,9 @@ def set_cached_session_cookies(cookies: Dict[str, str]):
     _recaptcha_session_cookies = dict(cookies)
     _recaptcha_session_cookies_fetched_at = time.time()
     if cookies:
-        debug_logger.log_info("[BrowserCaptcha] session cookie 缓存已更新: %d cookies", len(cookies))
+        debug_logger.log_info(
+            "[BrowserCaptcha] session cookie 缓存已更新: %d cookies", len(cookies)
+        )
 
 
 def clear_cached_session_cookies():
@@ -140,7 +153,9 @@ PERSONAL_HEADLESS_VISIBLE_SPOOF_SOURCE = r"""
     } catch (e) {}
 })();
 """
-PERSONAL_FINGERPRINT_SURFACE_SPOOF_MARKER = "__personalFingerprintSurfaceSpoofInstalled__"
+PERSONAL_FINGERPRINT_SURFACE_SPOOF_MARKER = (
+    "__personalFingerprintSurfaceSpoofInstalled__"
+)
 PERSONAL_RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 PERSONAL_RUNTIME_TMP_DIR = PERSONAL_RUNTIME_ROOT / "tmp"
 PERSONAL_RUNTIME_DATA_DIR = PERSONAL_RUNTIME_ROOT / "data"
@@ -150,18 +165,18 @@ PERSONAL_RUNTIME_DATA_DIR = PERSONAL_RUNTIME_ROOT / "data"
 def _is_running_in_docker() -> bool:
     """检测是否在 Docker 容器中运行"""
     # 方法1: 检查 /.dockerenv 文件
-    if os.path.exists('/.dockerenv'):
+    if os.path.exists("/.dockerenv"):
         return True
     # 方法2: 检查 cgroup
     try:
-        with open('/proc/1/cgroup', 'r') as f:
+        with open("/proc/1/cgroup", "r") as f:
             content = f.read()
-            if 'docker' in content or 'kubepods' in content or 'containerd' in content:
+            if "docker" in content or "kubepods" in content or "containerd" in content:
                 return True
     except:
         pass
     # 方法3: 检查环境变量
-    if os.environ.get('DOCKER_CONTAINER') or os.environ.get('KUBERNETES_SERVICE_HOST'):
+    if os.environ.get("DOCKER_CONTAINER") or os.environ.get("KUBERNETES_SERVICE_HOST"):
         return True
     return False
 
@@ -175,19 +190,21 @@ def _is_truthy_env(name: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-ALLOW_DOCKER_HEADED = (
-    _is_truthy_env("ALLOW_DOCKER_HEADED_CAPTCHA")
-    or _is_truthy_env("ALLOW_DOCKER_BROWSER_CAPTCHA")
+ALLOW_DOCKER_HEADED = _is_truthy_env("ALLOW_DOCKER_HEADED_CAPTCHA") or _is_truthy_env(
+    "ALLOW_DOCKER_BROWSER_CAPTCHA"
 )
 DOCKER_HEADED_BLOCKED = IS_DOCKER and not ALLOW_DOCKER_HEADED
 
 RECAPTCHA_SCRIPT_CACHE_TTL_SECONDS = 86400
 RECAPTCHA_SCRIPT_DOWNLOAD_TIMEOUT_SECONDS = 20
 RECAPTCHA_ASSET_CACHE_TTL_SECONDS = 86400
-RECAPTCHA_CACHE_CLEANUP_MAX_AGE_SECONDS = max(
+RECAPTCHA_CACHE_CLEANUP_MAX_AGE_SECONDS = (
+    max(
     RECAPTCHA_SCRIPT_CACHE_TTL_SECONDS,
     RECAPTCHA_ASSET_CACHE_TTL_SECONDS,
-) * 3
+    )
+    * 3
+)
 PERSONAL_RUNTIME_PROFILE_STALE_TTL_SECONDS = 6 * 60 * 60
 PERSONAL_PROXY_EXTENSION_STALE_TTL_SECONDS = 6 * 60 * 60
 RECAPTCHA_REMOTE_URL_PATTERN = re.compile(r"https?://[^\s\"'<>\\)]+", re.IGNORECASE)
@@ -257,19 +274,34 @@ def _cleanup_runtime_artifacts_sync(
             for child in PERSONAL_RUNTIME_TMP_DIR.iterdir():
                 child_name = child.name
                 normalized_child = os.path.normcase(os.path.normpath(str(child)))
-                if child_name.startswith(("browser_profile_", "fresh_browser_profile_", "launch_retry_profile_")):
+                if child_name.startswith(
+                    (
+                        "browser_profile_",
+                        "fresh_browser_profile_",
+                        "launch_retry_profile_",
+                    )
+                ):
                     if normalized_child in normalized_active_runtime_paths:
                         continue
                     age_seconds = _path_mtime_age_seconds(child, now_value)
-                    if age_seconds is not None and age_seconds >= PERSONAL_RUNTIME_PROFILE_STALE_TTL_SECONDS:
+                    if (
+                        age_seconds is not None
+                        and age_seconds >= PERSONAL_RUNTIME_PROFILE_STALE_TTL_SECONDS
+                    ):
                         if _remove_path_quietly(child):
                             stats["profiles_deleted"] += 1
-                elif child_name in {"recaptcha_js", "recaptcha_assets"} and child.is_dir():
+                elif (
+                    child_name in {"recaptcha_js", "recaptcha_assets"}
+                    and child.is_dir()
+                ):
                     for cache_file in child.iterdir():
                         if not cache_file.is_file():
                             continue
                         age_seconds = _path_mtime_age_seconds(cache_file, now_value)
-                        if age_seconds is None or age_seconds < RECAPTCHA_CACHE_CLEANUP_MAX_AGE_SECONDS:
+                        if (
+                            age_seconds is None
+                            or age_seconds < RECAPTCHA_CACHE_CLEANUP_MAX_AGE_SECONDS
+                        ):
                             continue
                         if _remove_path_quietly(cache_file):
                             stats["recaptcha_cache_deleted"] += 1
@@ -280,13 +312,18 @@ def _cleanup_runtime_artifacts_sync(
     try:
         if temp_root.exists():
             for child in temp_root.iterdir():
-                if not child.is_dir() or not child.name.startswith("nodriver_proxy_auth_"):
+                if not child.is_dir() or not child.name.startswith(
+                    "nodriver_proxy_auth_"
+                ):
                     continue
                 normalized_child = os.path.normcase(os.path.normpath(str(child)))
                 if normalized_child in normalized_active_proxy_paths:
                     continue
                 age_seconds = _path_mtime_age_seconds(child, now_value)
-                if age_seconds is None or age_seconds < PERSONAL_PROXY_EXTENSION_STALE_TTL_SECONDS:
+                if (
+                    age_seconds is None
+                    or age_seconds < PERSONAL_PROXY_EXTENSION_STALE_TTL_SECONDS
+                ):
                     continue
                 if _remove_path_quietly(child):
                     stats["proxy_extensions_deleted"] += 1
@@ -307,9 +344,9 @@ def _run_pip_install(package: str, use_mirror: bool = False) -> bool:
     Returns:
         是否安装成功
     """
-    cmd = [sys.executable, '-m', 'pip', 'install', package]
+    cmd = [sys.executable, "-m", "pip", "install", package]
     if use_mirror:
-        cmd.extend(['-i', 'https://pypi.tuna.tsinghua.edu.cn/simple'])
+        cmd.extend(["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"])
     
     try:
         debug_logger.log_info(f"[BrowserCaptcha] 正在安装 {package}...")
@@ -320,7 +357,9 @@ def _run_pip_install(package: str, use_mirror: bool = False) -> bool:
             print(f"[BrowserCaptcha] ✅ {package} 安装成功")
             return True
         else:
-            debug_logger.log_warning(f"[BrowserCaptcha] {package} 安装失败: {result.stderr[:200]}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] {package} 安装失败: {result.stderr[:200]}"
+            )
             return False
     except Exception as e:
         debug_logger.log_warning(f"[BrowserCaptcha] {package} 安装异常: {e}")
@@ -335,6 +374,7 @@ def _ensure_nodriver_installed() -> bool:
     """
     try:
         import nodriver
+
         debug_logger.log_info("[BrowserCaptcha] nodriver 已安装")
         return True
     except ImportError:
@@ -344,16 +384,18 @@ def _ensure_nodriver_installed() -> bool:
     print("[BrowserCaptcha] nodriver 未安装，开始自动安装...")
     
     # 先尝试官方源
-    if _run_pip_install('nodriver', use_mirror=False):
+    if _run_pip_install("nodriver", use_mirror=False):
         return True
     
     # 官方源失败，尝试国内镜像
     debug_logger.log_info("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
     print("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
-    if _run_pip_install('nodriver', use_mirror=True):
+    if _run_pip_install("nodriver", use_mirror=True):
         return True
     
-    debug_logger.log_error("[BrowserCaptcha] ❌ nodriver 自动安装失败，请手动安装: pip install nodriver")
+    debug_logger.log_error(
+        "[BrowserCaptcha] ❌ nodriver 自动安装失败，请手动安装: pip install nodriver"
+    )
     print("[BrowserCaptcha] ❌ nodriver 自动安装失败，请手动安装: pip install nodriver")
     return False
 
@@ -444,18 +486,54 @@ def _detect_real_browser_executable_path() -> Optional[str]:
             "Google Chrome",
             "chrome.exe",
             [
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
-                os.path.join(os.environ.get("PROGRAMFILES", ""), "Google", "Chrome", "Application", "chrome.exe"),
-                os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
+                os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""),
+                    "Google",
+                    "Chrome",
+                    "Application",
+                    "chrome.exe",
+                ),
+                os.path.join(
+                    os.environ.get("PROGRAMFILES", ""),
+                    "Google",
+                    "Chrome",
+                    "Application",
+                    "chrome.exe",
+                ),
+                os.path.join(
+                    os.environ.get("PROGRAMFILES(X86)", ""),
+                    "Google",
+                    "Chrome",
+                    "Application",
+                    "chrome.exe",
+                ),
             ],
         ),
         (
             "Microsoft Edge",
             "msedge.exe",
             [
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Edge", "Application", "msedge.exe"),
-                os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft", "Edge", "Application", "msedge.exe"),
-                os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft", "Edge", "Application", "msedge.exe"),
+                os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""),
+                    "Microsoft",
+                    "Edge",
+                    "Application",
+                    "msedge.exe",
+                ),
+                os.path.join(
+                    os.environ.get("PROGRAMFILES", ""),
+                    "Microsoft",
+                    "Edge",
+                    "Application",
+                    "msedge.exe",
+                ),
+                os.path.join(
+                    os.environ.get("PROGRAMFILES(X86)", ""),
+                    "Microsoft",
+                    "Edge",
+                    "Application",
+                    "msedge.exe",
+                ),
             ],
         ),
         (
@@ -489,9 +567,24 @@ def _detect_real_browser_executable_path() -> Optional[str]:
             "Chromium",
             "chrome.exe",
             [
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Chromium", "Application", "chrome.exe"),
-                os.path.join(os.environ.get("PROGRAMFILES", ""), "Chromium", "Application", "chrome.exe"),
-                os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Chromium", "Application", "chrome.exe"),
+                os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""),
+                    "Chromium",
+                    "Application",
+                    "chrome.exe",
+                ),
+                os.path.join(
+                    os.environ.get("PROGRAMFILES", ""),
+                    "Chromium",
+                    "Application",
+                    "chrome.exe",
+                ),
+                os.path.join(
+                    os.environ.get("PROGRAMFILES(X86)", ""),
+                    "Chromium",
+                    "Application",
+                    "chrome.exe",
+                ),
             ],
         ),
     ]
@@ -517,7 +610,9 @@ def _detect_real_browser_executable_path() -> Optional[str]:
 
 def _resolve_browser_executable_path() -> tuple[Optional[str], str]:
     """解析浏览器优先级：环境变量 > auto。"""
-    browser_executable_path = os.environ.get("BROWSER_EXECUTABLE_PATH", "").strip() or None
+    browser_executable_path = (
+        os.environ.get("BROWSER_EXECUTABLE_PATH", "").strip() or None
+    )
     if browser_executable_path and not os.path.exists(browser_executable_path):
         debug_logger.log_warning(
             f"[BrowserCaptcha] 指定浏览器不存在，改回 nodriver 默认浏览器解析: {browser_executable_path}"
@@ -547,46 +642,46 @@ def _build_personal_browser_args(
     - 仅在未加载代理认证扩展时附加 `--incognito`，避免扩展在无痕窗口中失效。
     """
     browser_args = [
-        '--disable-quic',
-        '--disable-features=UseDnsHttpsSvcb,OptimizationHints,AutofillServerCommunication,CertificateTransparencyComponentUpdater,MediaRouter,GlobalMediaControls',
-        '--disable-dev-shm-usage',
-        '--disable-setuid-sandbox',
-        '--disable-breakpad',
-        '--disable-client-side-phishing-detection',
-        '--disable-gpu',
-        '--disable-infobars',
-        '--hide-scrollbars',
-        '--window-size=1280,720',
-        '--disable-background-networking',
-        '--disable-component-update',
-        '--disable-domain-reliability',
-        '--disable-sync',
-        '--disable-translate',
-        '--disable-default-apps',
-        '--metrics-recording-only',
-        '--mute-audio',
-        '--safebrowsing-disable-auto-update',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--no-zygote',
+        "--disable-quic",
+        "--disable-features=UseDnsHttpsSvcb,OptimizationHints,AutofillServerCommunication,CertificateTransparencyComponentUpdater,MediaRouter,GlobalMediaControls",
+        "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--disable-breakpad",
+        "--disable-client-side-phishing-detection",
+        "--disable-gpu",
+        "--disable-infobars",
+        "--hide-scrollbars",
+        "--window-size=1280,720",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-domain-reliability",
+        "--disable-sync",
+        "--disable-translate",
+        "--disable-default-apps",
+        "--metrics-recording-only",
+        "--mute-audio",
+        "--safebrowsing-disable-auto-update",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--no-zygote",
     ]
 
     if headless:
-        browser_args.append('--no-startup-window')
-        browser_args.append('--window-position=3000,3000')
+        browser_args.append("--no-startup-window")
+        browser_args.append("--window-position=3000,3000")
     else:
-        browser_args.append('--window-position=80,80')
+        browser_args.append("--window-position=80,80")
 
     if proxy_server_arg:
         browser_args.append(proxy_server_arg)
 
     if proxy_extension_dir:
         # 代理认证扩展在 bwsi/incognito 风格会话下容易失效，保持临时 profile 即可满足隔离需求。
-        browser_args.append(f'--load-extension={proxy_extension_dir}')
+        browser_args.append(f"--load-extension={proxy_extension_dir}")
     else:
-        browser_args.append('--bwsi')
-        browser_args.append('--disable-extensions')
-        browser_args.append('--incognito')
+        browser_args.append("--bwsi")
+        browser_args.append("--disable-extensions")
+        browser_args.append("--incognito")
 
     return browser_args
 
@@ -638,27 +733,27 @@ def _tune_personal_browser_args_for_docker_headed(
 ) -> list[str]:
     """Make Docker headed Chromium look closer to a regular desktop session."""
     removable_exact = {
-        '--disable-dev-shm-usage',
-        '--disable-setuid-sandbox',
-        '--disable-gpu',
-        '--disable-infobars',
-        '--hide-scrollbars',
-        '--disable-background-networking',
-        '--disable-sync',
-        '--disable-translate',
-        '--disable-default-apps',
-        '--bwsi',
-        '--incognito',
-        '--disable-extensions',
-        '--no-zygote',
+        "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--disable-gpu",
+        "--disable-infobars",
+        "--hide-scrollbars",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--disable-translate",
+        "--disable-default-apps",
+        "--bwsi",
+        "--incognito",
+        "--disable-extensions",
+        "--no-zygote",
     }
     removable_prefixes = (
-        '--window-size=',
-        '--window-position=',
-        '--lang=',
-        '--use-gl=',
-        '--ozone-platform=',
-        '--password-store=',
+        "--window-size=",
+        "--window-position=",
+        "--lang=",
+        "--use-gl=",
+        "--ozone-platform=",
+        "--password-store=",
     )
 
     tuned_args: list[str] = []
@@ -669,14 +764,16 @@ def _tune_personal_browser_args_for_docker_headed(
             continue
         tuned_args.append(arg)
 
-    tuned_args.extend([
-        '--window-size=1366,768',
-        '--window-position=40,40',
-        '--lang=zh-CN',
-        '--password-store=basic',
-        '--ozone-platform=x11',
-        '--use-gl=swiftshader',
-    ])
+    tuned_args.extend(
+        [
+            "--window-size=1366,768",
+            "--window-position=40,40",
+            "--lang=zh-CN",
+            "--password-store=basic",
+            "--ozone-platform=x11",
+            "--use-gl=swiftshader",
+        ]
+    )
     return tuned_args
 
 
@@ -702,6 +799,7 @@ else:
     if _ensure_nodriver_installed():
         try:
             import nodriver as uc
+
             NODRIVER_AVAILABLE = True
         except ImportError as e:
             debug_logger.log_error(f"[BrowserCaptcha] nodriver 导入失败: {e}")
@@ -712,7 +810,7 @@ _RUNTIME_ERROR_KEYWORDS = (
     "has been closed",
     "browser has been closed",
     "target closed",
-    "has no attribute \"closed\"",
+    'has no attribute "closed"',
     "has no attribute 'closed'",
     "connection closed",
     "connection lost",
@@ -800,7 +898,9 @@ def _is_runtime_normal_close_error(error: Any) -> bool:
     return any(keyword in error_text for keyword in _NORMAL_CLOSE_KEYWORDS)
 
 
-def _finalize_nodriver_send_task(connection, transaction, tx_id: int, task: asyncio.Task):
+def _finalize_nodriver_send_task(
+    connection, transaction, tx_id: int, task: asyncio.Task
+):
     """回收 nodriver websocket.send 的后台异常，避免事件循环打印未检索 task 错误。"""
     try:
         task.result()
@@ -851,7 +951,9 @@ def _is_nodriver_connection_closed(connection_instance) -> bool:
 
 def _patch_nodriver_connection_instance(connection_instance):
     """在连接实例级别收口 websocket.send 的后台异常。"""
-    if not connection_instance or getattr(connection_instance, "_flow2api_send_patched", False):
+    if not connection_instance or getattr(
+        connection_instance, "_flow2api_send_patched", False
+    ):
         return
     if (
         not callable(getattr(connection_instance, "send", None))
@@ -865,7 +967,9 @@ def _patch_nodriver_connection_instance(connection_instance):
     try:
         from nodriver.core import connection as nodriver_connection_module
     except Exception as e:
-        debug_logger.log_warning(f"[BrowserCaptcha] 加载 nodriver.connection 失败，跳过连接补丁: {e}")
+        debug_logger.log_warning(
+            f"[BrowserCaptcha] 加载 nodriver.connection 失败，跳过连接补丁: {e}"
+        )
         return
 
     class _CompatTransaction:
@@ -922,8 +1026,12 @@ def _patch_nodriver_connection_instance(connection_instance):
 
         send_task = asyncio.create_task(websocket.send(transaction.message))
         send_task.add_done_callback(
-            lambda task, connection=self, tx=transaction, current_tx_id=tx_id:
-            _finalize_nodriver_send_task(connection, tx, current_tx_id, task)
+            lambda task,
+            connection=self,
+            tx=transaction,
+            current_tx_id=tx_id: _finalize_nodriver_send_task(
+                connection, tx, current_tx_id, task
+            )
         )
         return await transaction
 
@@ -980,7 +1088,9 @@ def _patch_nodriver_browser_instance(browser_instance):
             pass
         return result
 
-    browser_instance.update_targets = types.MethodType(patched_update_targets, browser_instance)
+    browser_instance.update_targets = types.MethodType(
+        patched_update_targets, browser_instance
+    )
     browser_instance._flow2api_update_targets_patched = True
 
 
@@ -1004,9 +1114,11 @@ def _parse_proxy_url(proxy_url: str):
     if not proxy_url:
         return None, None, None, None, None
     url = proxy_url.strip()
-    if not re.match(r'^(http|https|socks5h?|socks5)://', url):
+    if not re.match(r"^(http|https|socks5h?|socks5)://", url):
         url = f"http://{url}"
-    m = re.match(r'^(socks5h?|socks5|http|https)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$', url)
+    m = re.match(
+        r"^(socks5h?|socks5|http|https)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$", url
+    )
     if not m:
         return None, None, None, None, None
     protocol, username, password, host, port = m.groups()
@@ -1112,7 +1224,9 @@ def _get_recaptcha_asset_cache_dir() -> Path:
     return cache_dir
 
 
-def _guess_recaptcha_asset_mime_type(remote_url: str, response_mime: Optional[str] = None) -> str:
+def _guess_recaptcha_asset_mime_type(
+    remote_url: str, response_mime: Optional[str] = None
+) -> str:
     """Best-effort MIME type detection for cached reCAPTCHA assets."""
     normalized = (response_mime or "").split(";", 1)[0].strip().lower()
     if normalized:
@@ -1239,12 +1353,16 @@ def _is_localizable_recaptcha_asset_url(remote_url: str) -> bool:
     suffix = Path(path).suffix.lower()
 
     if host in {"www.gstatic.com", "www.gstatic.cn", "fonts.gstatic.com"}:
-        return suffix in RECAPTCHA_STATIC_EXTENSIONS or "/recaptcha/" in path or "/api2/" in path
+        return (
+            suffix in RECAPTCHA_STATIC_EXTENSIONS
+            or "/recaptcha/" in path
+            or "/api2/" in path
+        )
 
     if host in {"www.google.com", "www.recaptcha.net"}:
         return path.startswith("/recaptcha/") and suffix in {".js", ".css"}
 
-    if host == "labs.google":
+    if host == "flow.google.com":
         return suffix in RECAPTCHA_STATIC_EXTENSIONS
 
     return False
@@ -1259,7 +1377,9 @@ def _iter_recaptcha_asset_url_aliases(remote_url: str) -> list[str]:
 
     aliases: list[str] = []
     seen: set[str] = set()
-    candidate_hosts = RECAPTCHA_STATIC_HOST_ALIASES.get(parsed.netloc.lower(), (parsed.netloc,))
+    candidate_hosts = RECAPTCHA_STATIC_HOST_ALIASES.get(
+        parsed.netloc.lower(), (parsed.netloc,)
+    )
     for host in candidate_hosts:
         candidate = urlunparse(parsed._replace(netloc=host))
         if candidate in seen:
@@ -1309,7 +1429,9 @@ def _iter_recaptcha_release_companion_urls(remote_url: str) -> list[str]:
     return companions
 
 
-def _create_proxy_auth_extension(protocol: str, host: str, port: str, username: str, password: str) -> str:
+def _create_proxy_auth_extension(
+    protocol: str, host: str, port: str, username: str, password: str
+) -> str:
     """Create a temporary Chrome extension directory for proxy authentication.
     Returns the path to the extension directory."""
     ext_dir = tempfile.mkdtemp(prefix="nodriver_proxy_auth_")
@@ -1379,6 +1501,7 @@ def _create_proxy_auth_extension(protocol: str, host: str, port: str, username: 
 
 class ResidentTabInfo:
     """常驻标签页信息结构"""
+
     def __init__(
         self,
         tab,
@@ -1431,8 +1554,8 @@ class BrowserCaptchaService:
     2. 传统模式 (Legacy Mode): 每次请求创建新标签页 (fallback)
     """
 
-    _instance: Optional['BrowserCaptchaService'] = None
-    _pool_instance: Optional['_PersonalBrowserPoolService'] = None
+    _instance: Optional["BrowserCaptchaService"] = None
+    _pool_instance: Optional["_PersonalBrowserPoolService"] = None
     _lock = asyncio.Lock()
     _launch_gate: Optional[asyncio.Semaphore] = None
     _launch_gate_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -1484,18 +1607,32 @@ class BrowserCaptchaService:
         self._refresh_runtime_fingerprint_spoof_seed()
 
         # 常驻模式相关属性
-        self._resident_tabs: dict[str, 'ResidentTabInfo'] = {}  # slot_id -> 常驻标签页信息
-        self._token_resident_affinity: dict[str, str] = {}  # token_id -> slot_id（优先保证 token 独占 context）
-        self._project_resident_affinity: dict[str, str] = {}  # project_id -> slot_id（最近一次使用）
+        self._resident_tabs: dict[
+            str, "ResidentTabInfo"
+        ] = {}  # slot_id -> 常驻标签页信息
+        self._token_resident_affinity: dict[
+            str, str
+        ] = {}  # token_id -> slot_id（优先保证 token 独占 context）
+        self._project_resident_affinity: dict[
+            str, str
+        ] = {}  # project_id -> slot_id（最近一次使用）
         self._resident_slot_seq = 0
         self._resident_pick_index = 0
         self._resident_lock = asyncio.Lock()  # 保护常驻标签页操作
-        self._browser_lock = asyncio.Lock()  # 保护浏览器初始化/关闭/重启，避免重复拉起实例
-        self._runtime_recover_lock = asyncio.Lock()  # 串行化浏览器级恢复，避免并发重启风暴
+        self._browser_lock = (
+            asyncio.Lock()
+        )  # 保护浏览器初始化/关闭/重启，避免重复拉起实例
+        self._runtime_recover_lock = (
+            asyncio.Lock()
+        )  # 串行化浏览器级恢复，避免并发重启风暴
         self._tab_build_lock = asyncio.Lock()  # 串行化冷启动/重建，降低 nodriver 抖动
-        self._legacy_lock = asyncio.Lock()  # 避免 legacy fallback 并发失控创建临时标签页
+        self._legacy_lock = (
+            asyncio.Lock()
+        )  # 避免 legacy fallback 并发失控创建临时标签页
         configured_total_tabs = getattr(config, "personal_max_resident_tabs", 5)
-        self._max_resident_tabs = self._resolve_personal_max_resident_tabs(configured_total_tabs)
+        self._max_resident_tabs = self._resolve_personal_max_resident_tabs(
+            configured_total_tabs
+        )
         self._idle_tab_ttl_seconds = max(
             60,
             int(getattr(config, "personal_idle_tab_ttl_seconds", 600) or 600),
@@ -1507,13 +1644,19 @@ class BrowserCaptchaService:
         self._session_refresh_timeout_seconds = 45.0
         self._health_probe_ttl_seconds = max(
             0.0,
-            float(getattr(config, "browser_personal_health_probe_ttl_seconds", 10.0) or 10.0),
+            float(
+                getattr(config, "browser_personal_health_probe_ttl_seconds", 10.0)
+                or 10.0
+            ),
         )
         self._last_health_probe_at = 0.0
         self._last_health_probe_ok = False
         self._fingerprint_cache_ttl_seconds = max(
             0.0,
-            float(getattr(config, "browser_personal_fingerprint_ttl_seconds", 300.0) or 300.0),
+            float(
+                getattr(config, "browser_personal_fingerprint_ttl_seconds", 300.0)
+                or 300.0
+            ),
         )
         self._last_fingerprint_at = 0.0
 
@@ -1557,7 +1700,9 @@ class BrowserCaptchaService:
     def _apply_browser_instance_identity(self, browser_instance_id: int) -> None:
         normalized_instance_id = max(0, int(browser_instance_id or 0))
         self._browser_instance_id = normalized_instance_id
-        self._slot_id_prefix = f"b{normalized_instance_id}-" if normalized_instance_id > 0 else ""
+        self._slot_id_prefix = (
+            f"b{normalized_instance_id}-" if normalized_instance_id > 0 else ""
+        )
 
     def apply_pool_worker_settings(
         self,
@@ -1571,15 +1716,21 @@ class BrowserCaptchaService:
         if max_resident_tabs_override is None:
             self._max_resident_tabs_override = None
         else:
-            self._max_resident_tabs_override = max(1, min(50, int(max_resident_tabs_override)))
+            self._max_resident_tabs_override = max(
+                1, min(50, int(max_resident_tabs_override))
+            )
 
         # pool 调整分片配额时，worker 需要立即更新本地有效 resident 上限；
         # 否则新创建的 worker 会沿用旧值，导致明明配置了多浏览器/多标签，
         # 实际每个实例仍只跑 1 个 resident slot。
         configured_total_tabs = getattr(config, "personal_max_resident_tabs", 5)
-        self._max_resident_tabs = self._resolve_personal_max_resident_tabs(configured_total_tabs)
+        self._max_resident_tabs = self._resolve_personal_max_resident_tabs(
+            configured_total_tabs
+        )
 
-    def _create_fresh_runtime_profile_dir(self, *, prefix: str = "fresh_browser_profile_") -> str:
+    def _create_fresh_runtime_profile_dir(
+        self, *, prefix: str = "fresh_browser_profile_"
+    ) -> str:
         PERSONAL_RUNTIME_TMP_DIR.mkdir(parents=True, exist_ok=True)
         fresh_profile_dir = tempfile.mkdtemp(
             prefix=prefix,
@@ -1593,7 +1744,9 @@ class BrowserCaptchaService:
 
     def _resolve_user_data_dir(self, headless: Optional[bool] = None) -> Optional[str]:
         _ = self.headless if headless is None else bool(headless)
-        existing_runtime_profile = str(getattr(self, "_runtime_ephemeral_user_data_dir", "") or "").strip()
+        existing_runtime_profile = str(
+            getattr(self, "_runtime_ephemeral_user_data_dir", "") or ""
+        ).strip()
         if existing_runtime_profile:
             return os.path.normpath(existing_runtime_profile)
 
@@ -1636,7 +1789,9 @@ class BrowserCaptchaService:
             *list(getattr(self, "_managed_runtime_profile_dirs", set()) or set()),
         ):
             normalized_path = str(raw_path or "").strip()
-            if not normalized_path or not self._is_runtime_managed_profile_dir(normalized_path):
+            if not normalized_path or not self._is_runtime_managed_profile_dir(
+                normalized_path
+            ):
                 continue
             try:
                 resolved_path = Path(normalized_path).resolve()
@@ -1653,7 +1808,9 @@ class BrowserCaptchaService:
     async def _purge_runtime_profile_dirs(self, reason: str) -> None:
         current_user_data_dir = str(self.user_data_dir or "").strip()
         cleanup_targets = self._collect_runtime_profile_cleanup_targets()
-        if current_user_data_dir and not self._is_runtime_managed_profile_dir(current_user_data_dir):
+        if current_user_data_dir and not self._is_runtime_managed_profile_dir(
+            current_user_data_dir
+        ):
             next_profile_dir = self._create_fresh_runtime_profile_dir()
             debug_logger.log_warning(
                 "[BrowserCaptcha] 当前 user_data_dir 不在运行时目录下，"
@@ -1686,10 +1843,14 @@ class BrowserCaptchaService:
             f"[BrowserCaptcha] profile 清理完成，下一次启动将使用全新临时 profile: {next_profile_dir} (reason={reason})"
         )
 
-    async def _cleanup_runtime_profile_dirs_after_shutdown(self, *, reason: str) -> bool:
+    async def _cleanup_runtime_profile_dirs_after_shutdown(
+        self, *, reason: str
+    ) -> bool:
         current_user_data_dir = str(self.user_data_dir or "").strip()
         cleanup_targets = self._collect_runtime_profile_cleanup_targets()
-        if current_user_data_dir and not self._is_runtime_managed_profile_dir(current_user_data_dir):
+        if current_user_data_dir and not self._is_runtime_managed_profile_dir(
+            current_user_data_dir
+        ):
             next_profile_dir = self._create_fresh_runtime_profile_dir()
             debug_logger.log_info(
                 "[BrowserCaptcha] 关闭后检测到自定义 profile 路径，"
@@ -1722,7 +1883,9 @@ class BrowserCaptchaService:
         )
         return True
 
-    def _resolve_personal_max_resident_tabs(self, configured_tabs: Optional[int] = None) -> int:
+    def _resolve_personal_max_resident_tabs(
+        self, configured_tabs: Optional[int] = None
+    ) -> int:
         """计算当前模式下的有效 resident tab 上限。"""
         try:
             resolved_tabs = (
@@ -1730,7 +1893,9 @@ class BrowserCaptchaService:
                 if self._max_resident_tabs_override is not None
                 else configured_tabs
             )
-            return max(1, min(50, int(resolved_tabs if resolved_tabs is not None else 5)))
+            return max(
+                1, min(50, int(resolved_tabs if resolved_tabs is not None else 5))
+            )
         except Exception:
             return 5
 
@@ -1744,7 +1909,10 @@ class BrowserCaptchaService:
         if not purge_disk:
             return
 
-        for cache_dir in (self._recaptcha_script_cache_dir, self._recaptcha_asset_cache_dir):
+        for cache_dir in (
+            self._recaptcha_script_cache_dir,
+            self._recaptcha_asset_cache_dir,
+        ):
             try:
                 if not cache_dir.exists():
                     continue
@@ -1761,7 +1929,9 @@ class BrowserCaptchaService:
         try:
             configured_value = getattr(config, "browser_count", None)
             if configured_value is None:
-                configured_value = config.get_raw_config().get("captcha", {}).get("browser_count", 1)
+                configured_value = (
+                    config.get_raw_config().get("captcha", {}).get("browser_count", 1)
+                )
         except Exception:
             configured_value = 1
 
@@ -1815,7 +1985,9 @@ class BrowserCaptchaService:
         return service
 
     @classmethod
-    async def cleanup_stale_runtime_artifacts(cls, *, reason: str = "manual") -> dict[str, int]:
+    async def cleanup_stale_runtime_artifacts(
+        cls, *, reason: str = "manual"
+    ) -> dict[str, int]:
         async with cls._lock:
             instances: list[Any] = []
             if cls._instance is not None:
@@ -1833,7 +2005,9 @@ class BrowserCaptchaService:
             for worker in workers:
                 for raw_path in (
                     str(getattr(worker, "user_data_dir", "") or "").strip(),
-                    str(getattr(worker, "_runtime_ephemeral_user_data_dir", "") or "").strip(),
+                    str(
+                        getattr(worker, "_runtime_ephemeral_user_data_dir", "") or ""
+                    ).strip(),
                 ):
                     if raw_path:
                         active_runtime_paths.add(raw_path)
@@ -1886,12 +2060,16 @@ class BrowserCaptchaService:
 
         self.headless = bool(getattr(config, "personal_headless", False))
         configured_max_tabs = config.personal_max_resident_tabs
-        self._max_resident_tabs = self._resolve_personal_max_resident_tabs(configured_max_tabs)
+        self._max_resident_tabs = self._resolve_personal_max_resident_tabs(
+            configured_max_tabs
+        )
         self._idle_tab_ttl_seconds = config.personal_idle_tab_ttl_seconds
         self._refresh_runtime_tunables()
         self.user_data_dir = self._resolve_user_data_dir(self.headless)
         self._proxy_config_signature = await self._build_proxy_config_signature()
-        runtime_config_changed = old_runtime_config_signature != self._proxy_config_signature
+        runtime_config_changed = (
+            old_runtime_config_signature != self._proxy_config_signature
+        )
 
         debug_logger.log_info(
             f"[BrowserCaptcha] Personal 配置已热更新: "
@@ -1905,13 +2083,10 @@ class BrowserCaptchaService:
             f"runtime_changed={runtime_config_changed}"
         )
         if (
-            (
                 old_headless != self.headless
                 or old_user_data_dir != self.user_data_dir
                 or runtime_config_changed
-            )
-            and (self._initialized or self.browser)
-        ):
+        ) and (self._initialized or self.browser):
             async with self._browser_lock:
                 await self._shutdown_browser_runtime_locked(
                     reason="reload_config_runtime_changed"
@@ -1926,7 +2101,9 @@ class BrowserCaptchaService:
         """在配额缩小时立即裁掉多余的空闲 resident tab，避免内存长期不回落。"""
         while True:
             async with self._resident_lock:
-                overflow = len(self._resident_tabs) - max(1, int(self._max_resident_tabs or 1))
+                overflow = len(self._resident_tabs) - max(
+                    1, int(self._max_resident_tabs or 1)
+                )
                 if overflow <= 0:
                     return
 
@@ -1935,7 +2112,10 @@ class BrowserCaptchaService:
                 for slot_id, resident_info in self._resident_tabs.items():
                     if resident_info.solve_lock.locked():
                         continue
-                    if int(getattr(resident_info, "pending_assignment_count", 0) or 0) > 0:
+                    if (
+                        int(getattr(resident_info, "pending_assignment_count", 0) or 0)
+                        > 0
+                    ):
                         continue
                     if resident_info.last_used_at < lru_last_used:
                         lru_last_used = resident_info.last_used_at
@@ -1982,24 +2162,39 @@ class BrowserCaptchaService:
         )
 
         signature_payload = {
-            "captcha_browser_proxy_enabled": bool(getattr(captcha_cfg, "browser_proxy_enabled", False)),
-            "captcha_browser_proxy_url": str(getattr(captcha_cfg, "browser_proxy_url", "") or "").strip(),
-            "captcha_browser_proxy_pool": normalize_pool(getattr(captcha_cfg, "browser_proxy_pool", "")),
+            "captcha_browser_proxy_enabled": bool(
+                getattr(captcha_cfg, "browser_proxy_enabled", False)
+            ),
+            "captcha_browser_proxy_url": str(
+                getattr(captcha_cfg, "browser_proxy_url", "") or ""
+            ).strip(),
+            "captcha_browser_proxy_pool": normalize_pool(
+                getattr(captcha_cfg, "browser_proxy_pool", "")
+            ),
             "captcha_browser_startup_cookie_enabled": startup_cookie_enabled,
-            "captcha_browser_startup_cookie_signature": build_cookie_signature(startup_cookie_text),
+            "captcha_browser_startup_cookie_signature": build_cookie_signature(
+                startup_cookie_text
+            ),
             "request_proxy_enabled": bool(getattr(proxy_cfg, "enabled", False)),
             "request_proxy_url": str(getattr(proxy_cfg, "proxy_url", "") or "").strip(),
             "request_proxy_pool": normalize_pool(getattr(proxy_cfg, "proxy_pool", "")),
-            "request_rotation_mode": str(getattr(proxy_cfg, "rotation_mode", "") or "").strip(),
+            "request_rotation_mode": str(
+                getattr(proxy_cfg, "rotation_mode", "") or ""
+            ).strip(),
         }
-        return json.dumps(signature_payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        return json.dumps(
+            signature_payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        )
 
     def _refresh_runtime_tunables(self):
         """刷新运行时调优参数，缺省时使用保守的低开销默认值。"""
         try:
             self._health_probe_ttl_seconds = max(
                 0.2,
-                float(getattr(config, "browser_personal_health_probe_ttl_seconds", 10.0) or 10.0),
+                float(
+                    getattr(config, "browser_personal_health_probe_ttl_seconds", 10.0)
+                    or 10.0
+                ),
             )
         except Exception:
             self._health_probe_ttl_seconds = 10.0
@@ -2007,24 +2202,37 @@ class BrowserCaptchaService:
         try:
             self._fingerprint_cache_ttl_seconds = max(
                 0.0,
-                float(getattr(config, "browser_personal_fingerprint_cache_ttl_seconds", 3600.0) or 3600.0),
+                float(
+                    getattr(
+                        config, "browser_personal_fingerprint_cache_ttl_seconds", 3600.0
+                    )
+                    or 3600.0
+                ),
             )
         except Exception:
             self._fingerprint_cache_ttl_seconds = 3600.0
 
-        self._fresh_profile_restart_every_n_solves = self._resolve_fresh_profile_restart_every_n_solves()
+        self._fresh_profile_restart_every_n_solves = (
+            self._resolve_fresh_profile_restart_every_n_solves()
+        )
 
     def _resolve_fresh_profile_restart_every_n_solves(self) -> int:
         """解析浏览器 fresh profile 轮换阈值，0 表示禁用。"""
         raw_value: Any = None
-        env_value = os.environ.get("PERSONAL_BROWSER_FRESH_RESTART_EVERY_N_SOLVES", "").strip()
+        env_value = os.environ.get(
+            "PERSONAL_BROWSER_FRESH_RESTART_EVERY_N_SOLVES", ""
+        ).strip()
         if env_value:
             raw_value = env_value
         else:
             try:
-                raw_value = config.get_raw_config().get("captcha", {}).get(
+                raw_value = (
+                    config.get_raw_config()
+                    .get("captcha", {})
+                    .get(
                     "browser_personal_fresh_restart_every_n_solves",
                     10,
+                )
                 )
             except Exception:
                 raw_value = 10
@@ -2049,15 +2257,24 @@ class BrowserCaptchaService:
             return 0.0
         return max(0.0, time.time() - last_active_at)
 
-    def _record_browser_solve_success(self, *, source: str, project_id: Optional[str] = None) -> int:
-        self._successful_solves_since_browser_start = max(
+    def _record_browser_solve_success(
+        self, *, source: str, project_id: Optional[str] = None
+    ) -> int:
+        self._successful_solves_since_browser_start = (
+            max(
             0,
             int(self._successful_solves_since_browser_start or 0),
-        ) + 1
+            )
+            + 1
+        )
 
         threshold = max(0, int(self._fresh_profile_restart_every_n_solves or 0))
         current_count = self._successful_solves_since_browser_start
-        if threshold > 0 and current_count >= threshold and not self._fresh_profile_restart_pending:
+        if (
+            threshold > 0
+            and current_count >= threshold
+            and not self._fresh_profile_restart_pending
+        ):
             self._fresh_profile_restart_pending = True
             self._fresh_profile_restart_pending_reason = (
                 f"{source}:{project_id or 'global'}:{current_count}/{threshold}"
@@ -2069,7 +2286,9 @@ class BrowserCaptchaService:
             )
         return current_count
 
-    def _mark_fresh_profile_restart_pending(self, *, reason: str, force: bool = False) -> None:
+    def _mark_fresh_profile_restart_pending(
+        self, *, reason: str, force: bool = False
+    ) -> None:
         normalized_reason = str(reason or "manual").strip() or "manual"
         already_pending = bool(self._fresh_profile_restart_pending)
         self._fresh_profile_restart_pending = True
@@ -2093,7 +2312,9 @@ class BrowserCaptchaService:
 
         async with self._resident_lock:
             for slot_id, resident_info in self._resident_tabs.items():
-                if self._is_resident_slot_busy_for_allocation_locked(slot_id, resident_info):
+                if self._is_resident_slot_busy_for_allocation_locked(
+                    slot_id, resident_info
+                ):
                     return True
         return False
 
@@ -2118,7 +2339,9 @@ class BrowserCaptchaService:
             return False
 
         threshold = max(0, int(self._fresh_profile_restart_every_n_solves or 0))
-        force_restart = bool(getattr(self, "_fresh_profile_restart_force_pending", False))
+        force_restart = bool(
+            getattr(self, "_fresh_profile_restart_force_pending", False)
+        )
         if threshold <= 0 and not force_restart:
             self._fresh_profile_restart_pending = False
             self._fresh_profile_restart_force_pending = False
@@ -2185,7 +2408,11 @@ class BrowserCaptchaService:
 
         while True:
             existing_task = getattr(self, "_fresh_profile_restart_task", None)
-            if existing_task is not None and not existing_task.done() and existing_task is not current_task:
+            if (
+                existing_task is not None
+                and not existing_task.done()
+                and existing_task is not current_task
+            ):
                 if not waited:
                     waited = True
                     debug_logger.log_warning(
@@ -2209,7 +2436,9 @@ class BrowserCaptchaService:
                 return waited
 
             threshold = max(0, int(self._fresh_profile_restart_every_n_solves or 0))
-            force_restart = bool(getattr(self, "_fresh_profile_restart_force_pending", False))
+            force_restart = bool(
+                getattr(self, "_fresh_profile_restart_force_pending", False)
+            )
             if threshold <= 0 and not force_restart:
                 self._fresh_profile_restart_pending = False
                 self._fresh_profile_restart_force_pending = False
@@ -2231,7 +2460,11 @@ class BrowserCaptchaService:
             )
 
             scheduled_task = getattr(self, "_fresh_profile_restart_task", None)
-            if scheduled_task is None or scheduled_task.done() or scheduled_task is current_task:
+            if (
+                scheduled_task is None
+                or scheduled_task.done()
+                or scheduled_task is current_task
+            ):
                 await asyncio.sleep(0.05)
                 continue
 
@@ -2266,8 +2499,7 @@ class BrowserCaptchaService:
             )
         if not NODRIVER_AVAILABLE or uc is None:
             raise RuntimeError(
-                "nodriver 未安装或不可用。"
-                "请手动安装: pip install nodriver"
+                "nodriver 未安装或不可用。请手动安装: pip install nodriver"
             )
 
     async def _run_with_timeout(self, awaitable, timeout_seconds: float, label: str):
@@ -2278,9 +2510,16 @@ class BrowserCaptchaService:
         except asyncio.TimeoutError as e:
             raise TimeoutError(f"{label} 超时 ({effective_timeout:.1f}s)") from e
 
-    async def _wait_for_display_ready(self, display_value: str, timeout_seconds: float = 5.0):
+    async def _wait_for_display_ready(
+        self, display_value: str, timeout_seconds: float = 5.0
+    ):
         """Docker 有头模式下等待 X display socket 就绪，避免容器重启后立刻拉起浏览器失败。"""
-        if not (IS_DOCKER and display_value and display_value.startswith(":") and os.name == "posix"):
+        if not (
+            IS_DOCKER
+            and display_value
+            and display_value.startswith(":")
+            and os.name == "posix"
+        ):
             return
 
         display_suffix = display_value.split(".", 1)[0].lstrip(":")
@@ -2306,7 +2545,9 @@ class BrowserCaptchaService:
         if not (self._initialized and self.browser and self._last_health_probe_ok):
             return False
         try:
-            if self.browser.stopped or getattr(self.browser, "_flow2api_runtime_disconnected", False):
+            if self.browser.stopped or getattr(
+                self.browser, "_flow2api_runtime_disconnected", False
+            ):
                 return False
         except Exception:
             return False
@@ -2337,7 +2578,9 @@ class BrowserCaptchaService:
         return (time.time() - self._last_runtime_restart_at) <= max(0.0, window_seconds)
 
     def _get_browser_launch_cooldown_remaining_seconds(self) -> float:
-        return max(0.0, float(self._browser_launch_cooldown_until or 0.0) - time.monotonic())
+        return max(
+            0.0, float(self._browser_launch_cooldown_until or 0.0) - time.monotonic()
+        )
 
     def _is_browser_launch_cooldown_active(self) -> bool:
         return self._get_browser_launch_cooldown_remaining_seconds() > 0.0
@@ -2357,20 +2600,30 @@ class BrowserCaptchaService:
         base_cooldown_seconds = 2.0
         if isinstance(error, PermissionError) or "winerror 5" in error_lower:
             base_cooldown_seconds = 5.0
-        elif any(keyword in error_lower for keyword in ("address already in use", "only one usage", "port")):
+        elif any(
+            keyword in error_lower
+            for keyword in ("address already in use", "only one usage", "port")
+        ):
             base_cooldown_seconds = 8.0
         cooldown_seconds = min(
             45.0,
-            base_cooldown_seconds * (2 ** min(4, self._browser_launch_failure_streak - 1)),
+            base_cooldown_seconds
+            * (2 ** min(4, self._browser_launch_failure_streak - 1)),
         )
         self._browser_launch_cooldown_until = time.monotonic() + cooldown_seconds
-        self._browser_launch_last_error = f"{type(error).__name__}: {error_text or '<empty>'}"
+        self._browser_launch_last_error = (
+            f"{type(error).__name__}: {error_text or '<empty>'}"
+        )
 
     def _raise_if_browser_launch_cooling_down(self) -> None:
         remaining_seconds = self._get_browser_launch_cooldown_remaining_seconds()
         if remaining_seconds <= 0.0:
             return
-        suffix = f", last_error={self._browser_launch_last_error}" if self._browser_launch_last_error else ""
+        suffix = (
+            f", last_error={self._browser_launch_last_error}"
+            if self._browser_launch_last_error
+            else ""
+        )
         raise RuntimeError(
             f"浏览器启动冷却中，请 {remaining_seconds:.1f}s 后重试{suffix}"
         )
@@ -2433,7 +2686,8 @@ class BrowserCaptchaService:
         return (
             "failed to find browser context" in error_text
             or "cannot find context with specified id" in error_text
-            or "browser context" in error_text and "-32602" in error_text
+            or "browser context" in error_text
+            and "-32602" in error_text
         )
 
     async def shutdown_idle_runtime_if_needed(
@@ -2448,13 +2702,19 @@ class BrowserCaptchaService:
         try:
             ttl_seconds = max(
                 60,
-                int(self._idle_tab_ttl_seconds if idle_ttl_seconds is None else idle_ttl_seconds),
+                int(
+                    self._idle_tab_ttl_seconds
+                    if idle_ttl_seconds is None
+                    else idle_ttl_seconds
+                ),
             )
         except Exception:
             ttl_seconds = 600
 
         browser_instance = self.browser
-        if not (self._initialized and browser_instance) or getattr(browser_instance, "stopped", False):
+        if not (self._initialized and browser_instance) or getattr(
+            browser_instance, "stopped", False
+        ):
             return False
         if self._get_runtime_idle_seconds() < ttl_seconds:
             return False
@@ -2485,7 +2745,11 @@ class BrowserCaptchaService:
                     continue
                 reclaimable_slot_ids.append(
                     (
-                        current_time - float(getattr(resident_info, "last_used_at", current_time) or current_time),
+                        current_time
+                        - float(
+                            getattr(resident_info, "last_used_at", current_time)
+                            or current_time
+                        ),
                         slot_id,
                     )
                 )
@@ -2525,20 +2789,34 @@ class BrowserCaptchaService:
 
         should_shutdown_runtime = False
         browser_instance = self.browser
-        if self._initialized and browser_instance and not getattr(browser_instance, "stopped", False):
+        if (
+            self._initialized
+            and browser_instance
+            and not getattr(browser_instance, "stopped", False)
+        ):
             has_active_work = await self._has_active_browser_work()
             async with self._resident_lock:
                 has_resident_tabs = bool(self._resident_tabs)
             async with self._custom_lock:
                 has_custom_tabs = bool(self._custom_tabs)
-            should_shutdown_runtime = not has_active_work and not has_resident_tabs and not has_custom_tabs
+            should_shutdown_runtime = (
+                not has_active_work and not has_resident_tabs and not has_custom_tabs
+            )
 
         if should_shutdown_runtime:
-            await self._shutdown_browser_runtime(cancel_idle_reaper=False, reason=f"memory_reclaim:{reason}")
+            await self._shutdown_browser_runtime(
+                cancel_idle_reaper=False, reason=f"memory_reclaim:{reason}"
+            )
             stats["runtime_shutdown"] += 1
 
-        stale_stats = await self.cleanup_stale_runtime_artifacts(reason=f"memory_reclaim:{reason}")
-        for key in ("profiles_deleted", "recaptcha_cache_deleted", "proxy_extensions_deleted"):
+        stale_stats = await self.cleanup_stale_runtime_artifacts(
+            reason=f"memory_reclaim:{reason}"
+        )
+        for key in (
+            "profiles_deleted",
+            "recaptcha_cache_deleted",
+            "proxy_extensions_deleted",
+        ):
             stats[key] = int(stale_stats.get(key, 0) or 0)
 
         try:
@@ -2552,12 +2830,16 @@ class BrowserCaptchaService:
 
     def _is_browser_runtime_error(self, error: Any) -> bool:
         """识别浏览器运行态已损坏/已关闭的典型异常。"""
-        return _is_runtime_disconnect_error(error) or self._is_no_browser_window_error(error)
+        return _is_runtime_disconnect_error(error) or self._is_no_browser_window_error(
+            error
+        )
 
     @staticmethod
     def _is_no_browser_window_error(error: Any) -> bool:
         error_text = str(error or "").lower()
-        return "no browser is open" in error_text or "failed to open new tab" in error_text
+        return (
+            "no browser is open" in error_text or "failed to open new tab" in error_text
+        )
 
     def _decode_nodriver_object_entries(self, value: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(value, list):
@@ -2636,7 +2918,10 @@ class BrowserCaptchaService:
                 timeout_seconds=3.0,
                 label="browser.health_probe",
             )
-            if self._requires_virtual_display() and not await self._browser_has_page_targets():
+            if (
+                self._requires_virtual_display()
+                and not await self._browser_has_page_targets()
+            ):
                 await self._ensure_browser_host_page(
                     label="browser_health_probe",
                     timeout_seconds=3.0,
@@ -2648,11 +2933,17 @@ class BrowserCaptchaService:
             debug_logger.log_warning(f"[BrowserCaptcha] 浏览器健康检查失败: {e}")
             return False
 
-    async def _recover_browser_runtime(self, project_id: Optional[str] = None, reason: str = "runtime_error") -> bool:
+    async def _recover_browser_runtime(
+        self, project_id: Optional[str] = None, reason: str = "runtime_error"
+    ) -> bool:
         """浏览器运行态损坏时，优先整颗浏览器重启并恢复 resident 池。"""
         normalized_project_id = str(project_id or "").strip()
         async with self._runtime_recover_lock:
-            if self.browser and self._initialized and not getattr(self.browser, "stopped", False):
+            if (
+                self.browser
+                and self._initialized
+                and not getattr(self.browser, "stopped", False)
+            ):
                 try:
                     if await self._probe_browser_runtime():
                         debug_logger.log_info(
@@ -2666,7 +2957,9 @@ class BrowserCaptchaService:
 
             if normalized_project_id:
                 try:
-                    if await self._restart_browser_for_project_unlocked(normalized_project_id):
+                    if await self._restart_browser_for_project_unlocked(
+                        normalized_project_id
+                    ):
                         self._mark_runtime_restart()
                         return True
                 except Exception as e:
@@ -2675,12 +2968,16 @@ class BrowserCaptchaService:
                     )
 
             try:
-                await self._shutdown_browser_runtime(cancel_idle_reaper=False, reason=f"recover:{reason}")
+                await self._shutdown_browser_runtime(
+                    cancel_idle_reaper=False, reason=f"recover:{reason}"
+                )
                 await self.initialize()
                 self._mark_runtime_restart()
                 return True
             except Exception as e:
-                debug_logger.log_error(f"[BrowserCaptcha] 浏览器运行态恢复失败 ({reason}): {e}")
+                debug_logger.log_error(
+                    f"[BrowserCaptcha] 浏览器运行态恢复失败 ({reason}): {e}"
+                )
                 return False
 
     async def _tab_evaluate(
@@ -2706,7 +3003,9 @@ class BrowserCaptchaService:
             return self._normalize_nodriver_evaluate_result(result)
         return result
 
-    async def _tab_get(self, tab, url: str, label: str, timeout_seconds: Optional[float] = None):
+    async def _tab_get(
+        self, tab, url: str, label: str, timeout_seconds: Optional[float] = None
+    ):
         return await self._run_with_timeout(
             tab.get(url),
             timeout_seconds or self._navigation_timeout_seconds,
@@ -2763,7 +3062,9 @@ class BrowserCaptchaService:
             product=product,
         )
 
-    async def _get_live_browser_runtime_identity(self) -> tuple[Optional[str], Optional[str]]:
+    async def _get_live_browser_runtime_identity(
+        self,
+    ) -> tuple[Optional[str], Optional[str]]:
         if not self.browser:
             return None, None
 
@@ -2776,7 +3077,9 @@ class BrowserCaptchaService:
                 label="browser.get_version:runtime_profile",
             )
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] 读取浏览器运行态版本失败，回退默认 runtime profile: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 读取浏览器运行态版本失败，回退默认 runtime profile: {e}"
+            )
             return None, None
 
         user_agent = None
@@ -2790,14 +3093,20 @@ class BrowserCaptchaService:
             user_agent = version_info.get("userAgent")
         else:
             product = getattr(version_info, "product", None)
-            user_agent = getattr(version_info, "userAgent", None) or getattr(version_info, "user_agent", None)
+            user_agent = getattr(version_info, "userAgent", None) or getattr(
+                version_info, "user_agent", None
+            )
 
         normalized_user_agent = str(user_agent or "").strip() or None
         normalized_product = str(product or "").strip() or None
         if normalized_user_agent:
-            normalized_user_agent = normalized_user_agent.replace("HeadlessChrome/", "Chrome/")
+            normalized_user_agent = normalized_user_agent.replace(
+                "HeadlessChrome/", "Chrome/"
+            )
         if normalized_product:
-            normalized_product = normalized_product.replace("HeadlessChrome/", "Chrome/")
+            normalized_product = normalized_product.replace(
+                "HeadlessChrome/", "Chrome/"
+            )
         return normalized_user_agent, normalized_product
 
     def _get_runtime_surface_profile(self) -> Dict[str, Any]:
@@ -2827,7 +3136,9 @@ class BrowserCaptchaService:
         brands = metadata.get("brands") or []
         full_version_list = metadata.get("fullVersionList") or []
         sec_ch_ua = self._format_runtime_client_hint_brands(brands)
-        sec_ch_ua_full_version_list = self._format_runtime_client_hint_brands(full_version_list)
+        sec_ch_ua_full_version_list = self._format_runtime_client_hint_brands(
+            full_version_list
+        )
         if sec_ch_ua:
             headers["Sec-CH-UA"] = sec_ch_ua
         headers["Sec-CH-UA-Mobile"] = "?1" if metadata.get("mobile") else "?0"
@@ -2863,23 +3174,33 @@ class BrowserCaptchaService:
                     version = str(item.get("version") or "").strip()
                     if not brand or not version:
                         continue
-                    result.append(cdp.emulation.UserAgentBrandVersion(brand=brand, version=version))
+                    result.append(
+                        cdp.emulation.UserAgentBrandVersion(
+                            brand=brand, version=version
+                        )
+                    )
                 return result
 
             return cdp.emulation.UserAgentMetadata(
                 platform=str(metadata_profile.get("platform") or "Windows"),
-                platform_version=str(metadata_profile.get("platformVersion") or "10.0.0"),
+                platform_version=str(
+                    metadata_profile.get("platformVersion") or "10.0.0"
+                ),
                 architecture=str(metadata_profile.get("architecture") or "x86"),
                 model=str(metadata_profile.get("model") or ""),
                 mobile=bool(metadata_profile.get("mobile")),
                 brands=_build_brand_items(metadata_profile.get("brands") or []),
-                full_version_list=_build_brand_items(metadata_profile.get("fullVersionList") or []),
+                full_version_list=_build_brand_items(
+                    metadata_profile.get("fullVersionList") or []
+                ),
                 full_version=str(metadata_profile.get("fullVersion") or ""),
                 bitness=str(metadata_profile.get("bitness") or "64"),
                 wow64=bool(metadata_profile.get("wow64")),
             )
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] 构建 UserAgentMetadata 失败，将跳过 UA-CH runtime 注入: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 构建 UserAgentMetadata 失败，将跳过 UA-CH runtime 注入: {e}"
+            )
             return None
 
     @staticmethod
@@ -2889,7 +3210,9 @@ class BrowserCaptchaService:
             return None
         return f"{parsed.scheme}://{parsed.netloc}"
 
-    def _build_runtime_permission_origins(self, target_url: Optional[str] = None) -> list[str]:
+    def _build_runtime_permission_origins(
+        self, target_url: Optional[str] = None
+    ) -> list[str]:
         seen: set[str] = set()
         origins: list[str] = []
         candidate_urls = [
@@ -2941,15 +3264,15 @@ class BrowserCaptchaService:
                     permission_settings[str(value or "").strip().lower()],
                 )
                 for key, value in permissions_profile.items()
-                if key in permission_mapping and str(value or "").strip().lower() in permission_settings
+                if key in permission_mapping
+                and str(value or "").strip().lower() in permission_settings
             ]
             if not configured_permissions:
                 return False
 
             normalized_browser_context_id = browser_context_id
-            if (
-                normalized_browser_context_id is not None
-                and not hasattr(normalized_browser_context_id, "to_json")
+            if normalized_browser_context_id is not None and not hasattr(
+                normalized_browser_context_id, "to_json"
             ):
                 normalized_browser_context_id = cdp.browser.BrowserContextID(
                     str(normalized_browser_context_id)
@@ -2962,7 +3285,9 @@ class BrowserCaptchaService:
                         await self._run_with_timeout(
                             self.browser.send(
                                 cdp.browser.set_permission(
-                                    permission=cdp.browser.PermissionDescriptor(name=permission_name),
+                                    permission=cdp.browser.PermissionDescriptor(
+                                        name=permission_name
+                                    ),
                                     setting=permission_setting,
                                     origin=origin,
                                     browser_context_id=normalized_browser_context_id,
@@ -2974,13 +3299,17 @@ class BrowserCaptchaService:
                     except Exception as permission_error:
                         if (
                             normalized_browser_context_id is None
-                            or not self._is_invalid_browser_context_error(permission_error)
+                            or not self._is_invalid_browser_context_error(
+                                permission_error
+                            )
                         ):
                             raise
                         await self._run_with_timeout(
                             self.browser.send(
                                 cdp.browser.set_permission(
-                                    permission=cdp.browser.PermissionDescriptor(name=permission_name),
+                                    permission=cdp.browser.PermissionDescriptor(
+                                        name=permission_name
+                                    ),
                                     setting=permission_setting,
                                     origin=origin,
                                 )
@@ -2991,7 +3320,9 @@ class BrowserCaptchaService:
                     applied = True
             return applied
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] 应用 runtime 权限画像失败 ({label}): {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 应用 runtime 权限画像失败 ({label}): {e}"
+            )
             return False
 
     async def _apply_runtime_profile_to_tab(
@@ -3007,7 +3338,11 @@ class BrowserCaptchaService:
 
         runtime_profile = self._get_runtime_surface_profile()
         runtime_signature = str(runtime_profile.get("signature") or "").strip()
-        target_context_id = browser_context_id if browser_context_id is not None else self._extract_tab_browser_context_id(tab)
+        target_context_id = (
+            browser_context_id
+            if browser_context_id is not None
+            else self._extract_tab_browser_context_id(tab)
+        )
         applied_marker = {
             "signature": runtime_signature,
             "browser_context_id": str(target_context_id or ""),
@@ -3039,8 +3374,16 @@ class BrowserCaptchaService:
             await self._run_with_timeout(
                 tab.send(
                     cdp.emulation.set_user_agent_override(
-                        user_agent=str(runtime_profile.get("userAgent") or navigator_profile.get("userAgent") or ""),
-                        accept_language=str(runtime_profile.get("acceptLanguage") or locale_profile.get("code") or ""),
+                        user_agent=str(
+                            runtime_profile.get("userAgent")
+                            or navigator_profile.get("userAgent")
+                            or ""
+                        ),
+                        accept_language=str(
+                            runtime_profile.get("acceptLanguage")
+                            or locale_profile.get("code")
+                            or ""
+                        ),
                         platform=str(navigator_profile.get("platform") or ""),
                         user_agent_metadata=self._build_runtime_user_agent_metadata(),
                     )
@@ -3060,10 +3403,24 @@ class BrowserCaptchaService:
             await self._run_with_timeout(
                 tab.send(
                     cdp.emulation.set_device_metrics_override(
-                        width=int(window_profile.get("innerWidth") or screen_profile.get("width") or 1280),
-                        height=int(window_profile.get("innerHeight") or screen_profile.get("height") or 720),
-                        device_scale_factor=float(window_profile.get("devicePixelRatio") or 1.0),
-                        mobile=bool((runtime_profile.get("userAgentMetadata") or {}).get("mobile")),
+                        width=int(
+                            window_profile.get("innerWidth")
+                            or screen_profile.get("width")
+                            or 1280
+                        ),
+                        height=int(
+                            window_profile.get("innerHeight")
+                            or screen_profile.get("height")
+                            or 720
+                        ),
+                        device_scale_factor=float(
+                            window_profile.get("devicePixelRatio") or 1.0
+                        ),
+                        mobile=bool(
+                            (runtime_profile.get("userAgentMetadata") or {}).get(
+                                "mobile"
+                            )
+                        ),
                         screen_width=int(screen_profile.get("width") or 1280),
                         screen_height=int(screen_profile.get("height") or 720),
                     )
@@ -3074,7 +3431,9 @@ class BrowserCaptchaService:
             timezone_id = str(timezone_profile.get("id") or "").strip()
             if timezone_id:
                 await self._run_with_timeout(
-                    tab.send(cdp.emulation.set_timezone_override(timezone_id=timezone_id)),
+                    tab.send(
+                        cdp.emulation.set_timezone_override(timezone_id=timezone_id)
+                    ),
                     timeout_seconds=5.0,
                     label=f"emulation.set_timezone_override:{label}",
                 )
@@ -3085,7 +3444,10 @@ class BrowserCaptchaService:
                     timeout_seconds=5.0,
                     label=f"emulation.set_locale_override:{label}",
                 )
-            if all(key in geolocation_profile for key in ("latitude", "longitude", "accuracy")):
+            if all(
+                key in geolocation_profile
+                for key in ("latitude", "longitude", "accuracy")
+            ):
                 await self._run_with_timeout(
                     tab.send(
                         cdp.emulation.set_geolocation_override(
@@ -3108,11 +3470,15 @@ class BrowserCaptchaService:
                 pass
             return True
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] 应用 runtime profile 失败 ({label}): {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 应用 runtime profile 失败 ({label}): {e}"
+            )
             return False
 
     @staticmethod
-    def _parse_runtime_browser_version(user_agent: Optional[str], product: Optional[str] = None) -> str:
+    def _parse_runtime_browser_version(
+        user_agent: Optional[str], product: Optional[str] = None
+    ) -> str:
         candidates = [
             str(user_agent or "").strip(),
             str(product or "").strip(),
@@ -3185,35 +3551,55 @@ class BrowserCaptchaService:
                 "acceptLanguage": "zh-CN,zh;q=0.9,en;q=0.8",
                 "languages": ["zh-CN", "zh", "en"],
                 "timezoneId": "Asia/Shanghai",
-                "geolocation": {"latitude": 31.2304, "longitude": 121.4737, "accuracy": 18.0},
+                "geolocation": {
+                    "latitude": 31.2304,
+                    "longitude": 121.4737,
+                    "accuracy": 18.0,
+                },
             },
             {
                 "locale": "en-US",
                 "acceptLanguage": "en-US,en;q=0.9",
                 "languages": ["en-US", "en"],
                 "timezoneId": "America/New_York",
-                "geolocation": {"latitude": 40.7128, "longitude": -74.0060, "accuracy": 20.0},
+                "geolocation": {
+                    "latitude": 40.7128,
+                    "longitude": -74.0060,
+                    "accuracy": 20.0,
+                },
             },
             {
                 "locale": "en-US",
                 "acceptLanguage": "en-US,en;q=0.9",
                 "languages": ["en-US", "en"],
                 "timezoneId": "America/Los_Angeles",
-                "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 20.0},
+                "geolocation": {
+                    "latitude": 34.0522,
+                    "longitude": -118.2437,
+                    "accuracy": 20.0,
+                },
             },
             {
                 "locale": "en-GB",
                 "acceptLanguage": "en-GB,en;q=0.9",
                 "languages": ["en-GB", "en"],
                 "timezoneId": "Europe/London",
-                "geolocation": {"latitude": 51.5074, "longitude": -0.1278, "accuracy": 18.0},
+                "geolocation": {
+                    "latitude": 51.5074,
+                    "longitude": -0.1278,
+                    "accuracy": 18.0,
+                },
             },
             {
                 "locale": "ja-JP",
                 "acceptLanguage": "ja-JP,ja;q=0.9,en;q=0.7",
                 "languages": ["ja-JP", "ja", "en"],
                 "timezoneId": "Asia/Tokyo",
-                "geolocation": {"latitude": 35.6762, "longitude": 139.6503, "accuracy": 18.0},
+                "geolocation": {
+                    "latitude": 35.6762,
+                    "longitude": 139.6503,
+                    "accuracy": 18.0,
+                },
             },
         )
         locale_profile = dict(locale_profiles[digest[2] % len(locale_profiles)])
@@ -3221,9 +3607,24 @@ class BrowserCaptchaService:
             {"width": 1366, "height": 768, "hardwareConcurrency": 4, "deviceMemory": 4},
             {"width": 1440, "height": 900, "hardwareConcurrency": 8, "deviceMemory": 8},
             {"width": 1536, "height": 864, "hardwareConcurrency": 8, "deviceMemory": 8},
-            {"width": 1600, "height": 900, "hardwareConcurrency": 10, "deviceMemory": 8},
-            {"width": 1680, "height": 1050, "hardwareConcurrency": 12, "deviceMemory": 8},
-            {"width": 1920, "height": 1080, "hardwareConcurrency": 12, "deviceMemory": 8},
+            {
+                "width": 1600,
+                "height": 900,
+                "hardwareConcurrency": 10,
+                "deviceMemory": 8,
+            },
+            {
+                "width": 1680,
+                "height": 1050,
+                "hardwareConcurrency": 12,
+                "deviceMemory": 8,
+            },
+            {
+                "width": 1920,
+                "height": 1080,
+                "hardwareConcurrency": 12,
+                "deviceMemory": 8,
+            },
         )
         base_profile = dict(desktop_profiles[digest[0] % len(desktop_profiles)])
         gpu_profiles = (
@@ -3248,9 +3649,13 @@ class BrowserCaptchaService:
         )
         gpu_profile = dict(gpu_profiles[digest[11] % len(gpu_profiles)])
         gpu_arch = "turing"
-        if "Intel" in str(gpu_profile.get("unmaskedVendor") or gpu_profile.get("vendor") or ""):
+        if "Intel" in str(
+            gpu_profile.get("unmaskedVendor") or gpu_profile.get("vendor") or ""
+        ):
             gpu_arch = "gen-9"
-        elif "ATI" in str(gpu_profile.get("unmaskedVendor") or "") or "AMD" in str(gpu_profile.get("vendor") or ""):
+        elif "ATI" in str(gpu_profile.get("unmaskedVendor") or "") or "AMD" in str(
+            gpu_profile.get("vendor") or ""
+        ):
             gpu_arch = "rdna"
         width = int(base_profile["width"])
         height = int(base_profile["height"])
@@ -3289,7 +3694,9 @@ class BrowserCaptchaService:
             },
             "navigator": {
                 "userAgent": effective_user_agent,
-                "appVersion": effective_user_agent.replace("Mozilla/", "", 1) if effective_user_agent.startswith("Mozilla/") else effective_user_agent,
+                "appVersion": effective_user_agent.replace("Mozilla/", "", 1)
+                if effective_user_agent.startswith("Mozilla/")
+                else effective_user_agent,
                 "platform": str(os_profile["js_platform"]),
                 "vendor": str(os_profile["vendor"]),
                 "language": str(locale_profile["locale"]),
@@ -3389,9 +3796,15 @@ class BrowserCaptchaService:
                 },
             },
             "webgpu": {
-                "vendor": str(gpu_profile.get("unmaskedVendor") or gpu_profile.get("vendor") or ""),
+                "vendor": str(
+                    gpu_profile.get("unmaskedVendor") or gpu_profile.get("vendor") or ""
+                ),
                 "architecture": gpu_arch,
-                "device": str(gpu_profile.get("unmaskedRenderer") or gpu_profile.get("renderer") or ""),
+                "device": str(
+                    gpu_profile.get("unmaskedRenderer")
+                    or gpu_profile.get("renderer")
+                    or ""
+                ),
                 "description": str(gpu_profile.get("renderer") or ""),
                 "isFallbackAdapter": False,
                 "preferredCanvasFormat": "bgra8unorm",
@@ -3469,7 +3882,9 @@ class BrowserCaptchaService:
                 "anyHover": "hover",
                 "pointer": "fine",
                 "anyPointer": "fine",
-                "orientation": "landscape" if viewport_width >= viewport_height else "portrait",
+                "orientation": "landscape"
+                if viewport_width >= viewport_height
+                else "portrait",
             },
             "storage": {
                 "quota": 120000000000 + int(digest[16] % 20) * 1000000000,
@@ -3551,7 +3966,12 @@ class BrowserCaptchaService:
             },
         }
         runtime_profile["signature"] = hashlib.sha256(
-            json.dumps(runtime_profile, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            json.dumps(
+                runtime_profile,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
         ).hexdigest()
         return runtime_profile
 
@@ -3607,7 +4027,9 @@ class BrowserCaptchaService:
                 "speechVoiceCount": 2 + (digest[16] % 4),
                 "screenX": (digest[17] % 17) - 8,
                 "screenY": (digest[18] % 17) - 8,
-                "orientationType": "landscape-primary" if is_landscape else "portrait-primary",
+                "orientationType": "landscape-primary"
+                if is_landscape
+                else "portrait-primary",
                 "orientationAngle": 0 if is_landscape else 90,
             },
         }
@@ -3618,8 +4040,7 @@ class BrowserCaptchaService:
             ensure_ascii=True,
             separators=(",", ":"),
         )
-        return (
-            """
+        return """
 (() => {
     const marker = __MARKER_JSON__;
     if (window[marker]) {
@@ -5358,17 +5779,21 @@ class BrowserCaptchaService:
         patchAnalyserMethod("getByteTimeDomainData", Number(config.audio.byteDelta || 1));
     }
 })();
-"""
-            .replace("__MARKER_JSON__", json.dumps(PERSONAL_FINGERPRINT_SURFACE_SPOOF_MARKER))
-            .replace("__CONFIG_JSON__", config_json)
-        )
+""".replace(
+            "__MARKER_JSON__", json.dumps(PERSONAL_FINGERPRINT_SURFACE_SPOOF_MARKER)
+        ).replace("__CONFIG_JSON__", config_json)
 
     async def _apply_fingerprint_surface_spoof(self, tab, *, label: str) -> bool:
         if tab is None:
             return False
 
-        runtime_signature = str(self._get_runtime_surface_profile().get("signature") or "").strip()
-        if getattr(tab, "_personal_fingerprint_surface_spoof_signature", None) == runtime_signature:
+        runtime_signature = str(
+            self._get_runtime_surface_profile().get("signature") or ""
+        ).strip()
+        if (
+            getattr(tab, "_personal_fingerprint_surface_spoof_signature", None)
+            == runtime_signature
+        ):
             return True
 
         try:
@@ -5450,14 +5875,18 @@ class BrowserCaptchaService:
             )
             return False
 
-    async def _dispatch_input_command(self, tab, command: Any, *, label: str, timeout_seconds: float = 2.0):
+    async def _dispatch_input_command(
+        self, tab, command: Any, *, label: str, timeout_seconds: float = 2.0
+    ):
         return await self._run_with_timeout(
             tab.send(command),
             timeout_seconds=timeout_seconds,
             label=label,
         )
 
-    async def _sleep_with_deadline(self, deadline: float, preferred_seconds: float) -> None:
+    async def _sleep_with_deadline(
+        self, deadline: float, preferred_seconds: float
+    ) -> None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return
@@ -5508,12 +5937,20 @@ class BrowserCaptchaService:
         normal_y = dx / distance
         curvature = min(distance * 0.25, max(24.0, distance * rng.uniform(0.08, 0.18)))
         control_a = (
-            start[0] + dx * rng.uniform(0.20, 0.35) + normal_x * curvature * rng.uniform(-1.0, 1.0),
-            start[1] + dy * rng.uniform(0.18, 0.32) + normal_y * curvature * rng.uniform(-1.0, 1.0),
+            start[0]
+            + dx * rng.uniform(0.20, 0.35)
+            + normal_x * curvature * rng.uniform(-1.0, 1.0),
+            start[1]
+            + dy * rng.uniform(0.18, 0.32)
+            + normal_y * curvature * rng.uniform(-1.0, 1.0),
         )
         control_b = (
-            start[0] + dx * rng.uniform(0.62, 0.82) + normal_x * curvature * rng.uniform(-1.0, 1.0),
-            start[1] + dy * rng.uniform(0.60, 0.84) + normal_y * curvature * rng.uniform(-1.0, 1.0),
+            start[0]
+            + dx * rng.uniform(0.62, 0.82)
+            + normal_x * curvature * rng.uniform(-1.0, 1.0),
+            start[1]
+            + dy * rng.uniform(0.60, 0.84)
+            + normal_y * curvature * rng.uniform(-1.0, 1.0),
         )
 
         path: list[tuple[float, float]] = []
@@ -5560,7 +5997,9 @@ class BrowserCaptchaService:
                 return_by_value=True,
             )
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] 启动预热读取 viewport 失败 ({label}): {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 启动预热读取 viewport 失败 ({label}): {e}"
+            )
             metrics = {}
 
         if not isinstance(metrics, dict):
@@ -5571,7 +6010,10 @@ class BrowserCaptchaService:
 
         viewport_width = max(640.0, float((metrics or {}).get("width") or 1280.0))
         viewport_height = max(480.0, float((metrics or {}).get("height") or 720.0))
-        scroll_height = max(viewport_height, float((metrics or {}).get("scrollHeight") or viewport_height))
+        scroll_height = max(
+            viewport_height,
+            float((metrics or {}).get("scrollHeight") or viewport_height),
+        )
 
         rng = random.Random(
             f"{time.time_ns()}:{getattr(self, '_browser_instance_id', 0)}:{label}:{viewport_width:.0f}x{viewport_height:.0f}"
@@ -5581,9 +6023,18 @@ class BrowserCaptchaService:
         upper = max(22.0, viewport_height * rng.uniform(0.10, 0.18))
         reading_targets = [
             (left, upper),
-            (viewport_width * rng.uniform(0.34, 0.42), viewport_height * rng.uniform(0.24, 0.34)),
-            (viewport_width * rng.uniform(0.54, 0.66), viewport_height * rng.uniform(0.42, 0.54)),
-            (viewport_width * rng.uniform(0.72, 0.84), viewport_height * rng.uniform(0.60, 0.76)),
+            (
+                viewport_width * rng.uniform(0.34, 0.42),
+                viewport_height * rng.uniform(0.24, 0.34),
+            ),
+            (
+                viewport_width * rng.uniform(0.54, 0.66),
+                viewport_height * rng.uniform(0.42, 0.54),
+            ),
+            (
+                viewport_width * rng.uniform(0.72, 0.84),
+                viewport_height * rng.uniform(0.60, 0.76),
+            ),
         ]
         current_point = (
             viewport_width * rng.uniform(0.08, 0.16),
@@ -5683,7 +6134,9 @@ class BrowserCaptchaService:
                         label=f"startup_human_key_down:{label}:{index}",
                         timeout_seconds=1.5,
                     )
-                    await self._sleep_with_deadline(deadline, 0.014 + rng.uniform(0.004, 0.022))
+                    await self._sleep_with_deadline(
+                        deadline, 0.014 + rng.uniform(0.004, 0.022)
+                    )
                     await self._dispatch_input_command(
                         tab,
                         cdp.input_.dispatch_key_event(
@@ -5697,7 +6150,12 @@ class BrowserCaptchaService:
                         timeout_seconds=1.5,
                     )
 
-            final_scroll = int(min(max(0.0, scroll_height - viewport_height), viewport_height * rng.uniform(0.08, 0.20)))
+            final_scroll = int(
+                min(
+                    max(0.0, scroll_height - viewport_height),
+                    viewport_height * rng.uniform(0.08, 0.20),
+                )
+            )
             if final_scroll > 0 and time.monotonic() < deadline:
                 try:
                     await self._tab_evaluate(
@@ -5797,7 +6255,10 @@ class BrowserCaptchaService:
             current_target_id = str(getattr(item, "target_id", "") or "").strip()
             if current_target_id != target_id:
                 continue
-            if getattr(getattr(item, "target", None), "browser_context_id", None) is not None:
+            if (
+                getattr(getattr(item, "target", None), "browser_context_id", None)
+                is not None
+            ):
                 break
             try:
                 item._browser = browser
@@ -5865,23 +6326,37 @@ class BrowserCaptchaService:
         if self.headless:
             tracked_host_page = await self._take_headless_host_page()
             if tracked_host_page is not None:
-                await self._apply_tab_startup_spoofs(tracked_host_page, label=f"{label}:tracked_host_page")
+                await self._apply_tab_startup_spoofs(
+                    tracked_host_page, label=f"{label}:tracked_host_page"
+                )
                 return tracked_host_page
 
         for item in getattr(browser, "targets", []):
             if getattr(item, "type_", None) == "page":
-                if self.headless and getattr(getattr(item, "target", None), "browser_context_id", None) is not None:
+                if (
+                    self.headless
+                    and getattr(
+                        getattr(item, "target", None), "browser_context_id", None
+                    )
+                    is not None
+                ):
                     continue
                 if self.headless:
-                    self._headless_host_target_id = str(getattr(item, "target_id", "") or "").strip() or None
+                    self._headless_host_target_id = (
+                        str(getattr(item, "target_id", "") or "").strip() or None
+                    )
                 try:
                     item._browser = browser
                 except Exception:
                     pass
-                await self._apply_tab_startup_spoofs(item, label=f"{label}:existing_host_page")
+                await self._apply_tab_startup_spoofs(
+                    item, label=f"{label}:existing_host_page"
+                )
                 return item
 
-        debug_logger.log_info(f"[BrowserCaptcha] 当前无可用 page target，创建宿主页 ({label})")
+        debug_logger.log_info(
+            f"[BrowserCaptcha] 当前无可用 page target，创建宿主页 ({label})"
+        )
         tab = await self._browser_get(
             PERSONAL_COOKIE_PREBIND_URL,
             label=f"{label}:host_page",
@@ -5894,7 +6369,9 @@ class BrowserCaptchaService:
         except Exception:
             pass
         if self.headless:
-            self._headless_host_target_id = str(getattr(tab, "target_id", "") or "").strip() or None
+            self._headless_host_target_id = (
+                str(getattr(tab, "target_id", "") or "").strip() or None
+            )
         await self._apply_tab_startup_spoofs(tab, label=f"{label}:host_page")
         return tab
 
@@ -5981,7 +6458,9 @@ class BrowserCaptchaService:
 
                 await asyncio.sleep(0.15)
 
-            last_error = RuntimeError(f"target not found after create_target (target_id={target_id})")
+            last_error = RuntimeError(
+                f"target not found after create_target (target_id={target_id})"
+            )
 
         raise last_error or RuntimeError("failed to create browser target")
 
@@ -6000,7 +6479,9 @@ class BrowserCaptchaService:
         """
         reusable_startup_tab = await self._take_visible_startup_page()
         if reusable_startup_tab is not None:
-            debug_logger.log_info(f"[BrowserCaptcha] 复用浏览器启动页打开目标标签 ({label})")
+            debug_logger.log_info(
+                f"[BrowserCaptcha] 复用浏览器启动页打开目标标签 ({label})"
+            )
             await self._apply_tab_startup_spoofs(
                 reusable_startup_tab,
                 label=f"{label}:reuse_startup_page",
@@ -6064,7 +6545,9 @@ class BrowserCaptchaService:
             except Exception as e:
                 debug_logger.log_warning(f"[BrowserCaptcha] 清理启动残留页失败: {e}")
 
-    async def _tab_reload(self, tab, label: str, timeout_seconds: Optional[float] = None):
+    async def _tab_reload(
+        self, tab, label: str, timeout_seconds: Optional[float] = None
+    ):
         return await self._run_with_timeout(
             tab.reload(),
             timeout_seconds or self._navigation_timeout_seconds,
@@ -6129,6 +6612,7 @@ class BrowserCaptchaService:
         target_id = None
 
         try:
+
             async def _send_create_target():
                 return await self._run_with_timeout(
                     browser.send(
@@ -6282,7 +6766,7 @@ class BrowserCaptchaService:
 
             lru_slot_id = None
             lru_project_hint = None
-            lru_last_used = float('inf')
+            lru_last_used = float("inf")
 
             for slot_id, resident_info in self._resident_tabs.items():
                 if resident_info.solve_lock.locked():
@@ -6379,14 +6863,16 @@ class BrowserCaptchaService:
         )
 
     @classmethod
-    def _build_personal_cookie_targets(cls, raw_cookie: Optional[str]) -> list[Dict[str, Any]]:
+    def _build_personal_cookie_targets(
+        cls, raw_cookie: Optional[str]
+    ) -> list[Dict[str, Any]]:
         """为 personal 内置浏览器构建 cookie 注入列表。
 
         说明：
         - 原始 Cookie 头没有 domain 元数据时，直接扩展到 labs/google/recaptcha 三个目标。
         - 即使 token.cookie 已经带有显式的 google.com 域，也额外镜像一份到
           `www.recaptcha.net`，保证 enterprise reload 首轮请求也能命中 cookie。
-        - 对 google/recaptcha 镜像副本强制使用 `SameSite=None`，避免 labs.google
+        - 对 Google/reCAPTCHA Cookie 强制使用 `SameSite=None`
           场景下第三方 anchor/reload 请求继续丢 cookie。
         """
         browser_cookies = build_browser_cookie_targets(
@@ -6400,7 +6886,9 @@ class BrowserCaptchaService:
         seen: set[str] = set()
 
         def append_cookie(cookie: Dict[str, Any]) -> None:
-            stable_key = json.dumps(cookie, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+            stable_key = json.dumps(
+                cookie, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+            )
             if stable_key in seen:
                 return
             seen.add(stable_key)
@@ -6419,14 +6907,18 @@ class BrowserCaptchaService:
 
             mirrored_cookie = dict(cookie)
             mirrored_cookie.pop("domain", None)
-            mirrored_cookie["path"] = str(mirrored_cookie.get("path") or "/").strip() or "/"
+            mirrored_cookie["path"] = (
+                str(mirrored_cookie.get("path") or "/").strip() or "/"
+            )
             mirrored_cookie["sameSite"] = "None"
             mirrored_cookie["secure"] = True
             for target_url in PERSONAL_GOOGLE_FAMILY_COOKIE_MIRROR_URLS:
-                append_cookie({
+                append_cookie(
+                    {
                     **mirrored_cookie,
                     "url": target_url,
-                })
+                    }
+                )
 
         return expanded
 
@@ -6439,7 +6931,9 @@ class BrowserCaptchaService:
         return cookie_text or None
 
     @classmethod
-    def _build_configured_browser_cookie_targets(cls, raw_cookie: Optional[str]) -> list[Dict[str, Any]]:
+    def _build_configured_browser_cookie_targets(
+        cls, raw_cookie: Optional[str]
+    ) -> list[Dict[str, Any]]:
         """构建系统级浏览器启动 cookie，确保 Google / reCAPTCHA 首跳都能命中。"""
         browser_cookies = build_browser_cookie_targets(
             raw_cookie,
@@ -6452,7 +6946,9 @@ class BrowserCaptchaService:
         seen: set[str] = set()
 
         def append_cookie(cookie: Dict[str, Any]) -> None:
-            stable_key = json.dumps(cookie, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+            stable_key = json.dumps(
+                cookie, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+            )
             if stable_key in seen:
                 return
             seen.add(stable_key)
@@ -6461,7 +6957,7 @@ class BrowserCaptchaService:
         for cookie in browser_cookies:
             scope_host = cls._extract_cookie_scope_host(cookie)
             explicit_domain = str(cookie.get("domain") or "").strip()
-            google_family_scope = cls._is_google_family_cookie_host(scope_host) or scope_host == "labs.google"
+            google_family_scope = cls._is_google_family_cookie_host(scope_host)
 
             if explicit_domain or not google_family_scope:
                 append_cookie(cookie)
@@ -6471,14 +6967,18 @@ class BrowserCaptchaService:
 
             mirrored_cookie = dict(cookie)
             mirrored_cookie.pop("domain", None)
-            mirrored_cookie["path"] = str(mirrored_cookie.get("path") or "/").strip() or "/"
+            mirrored_cookie["path"] = (
+                str(mirrored_cookie.get("path") or "/").strip() or "/"
+            )
             mirrored_cookie["sameSite"] = "None"
             mirrored_cookie["secure"] = True
             for target_url in PERSONAL_GOOGLE_FAMILY_COOKIE_MIRROR_URLS:
-                append_cookie({
+                append_cookie(
+                    {
                     **mirrored_cookie,
                     "url": target_url,
-                })
+                    }
+                )
 
         return expanded
 
@@ -6536,9 +7036,12 @@ class BrowserCaptchaService:
         current = resident_info or self._resident_tabs.get(normalized_slot_id)
         if current is None:
             return False
-        return current.solve_lock.locked() or self._resident_slot_has_pending_assignment_locked(
+        return (
+            current.solve_lock.locked()
+            or self._resident_slot_has_pending_assignment_locked(
             normalized_slot_id,
             current,
+        )
         )
 
     def _reserve_resident_slot_for_solve_locked(
@@ -6552,11 +7055,13 @@ class BrowserCaptchaService:
         current = resident_info or self._resident_tabs.get(normalized_slot_id)
         if current is None or not current.tab:
             return False
-        if self._is_resident_slot_busy_for_allocation_locked(normalized_slot_id, current):
+        if self._is_resident_slot_busy_for_allocation_locked(
+            normalized_slot_id, current
+        ):
             return False
-        current.pending_assignment_count = int(
-            getattr(current, "pending_assignment_count", 0) or 0
-        ) + 1
+        current.pending_assignment_count = (
+            int(getattr(current, "pending_assignment_count", 0) or 0) + 1
+        )
         return True
 
     def _release_resident_slot_reservation_locked(
@@ -6652,24 +7157,39 @@ class BrowserCaptchaService:
                     return None
                 return slot_id
             if slot_id not in self._resident_tabs or (
-                resident_info is not None and resident_info.project_id != normalized_project_id
+                resident_info is not None
+                and resident_info.project_id != normalized_project_id
             ):
                 self._project_resident_affinity.pop(normalized_project_id, None)
         return None
 
-    def _remember_project_affinity(self, project_id: Optional[str], slot_id: Optional[str], resident_info: Optional[ResidentTabInfo]):
+    def _remember_project_affinity(
+        self,
+        project_id: Optional[str],
+        slot_id: Optional[str],
+        resident_info: Optional[ResidentTabInfo],
+    ):
         normalized_project_id = str(project_id or "").strip()
         if not normalized_project_id or not slot_id or resident_info is None:
             return
-        self._forget_project_affinity_for_slot_locked(slot_id, preserve_project_id=normalized_project_id)
+        self._forget_project_affinity_for_slot_locked(
+            slot_id, preserve_project_id=normalized_project_id
+        )
         self._project_resident_affinity[normalized_project_id] = slot_id
         resident_info.project_id = normalized_project_id
 
-    def _remember_token_affinity(self, token_id: Optional[int], slot_id: Optional[str], resident_info: Optional[ResidentTabInfo]):
+    def _remember_token_affinity(
+        self,
+        token_id: Optional[int],
+        slot_id: Optional[str],
+        resident_info: Optional[ResidentTabInfo],
+    ):
         token_key = self._normalize_token_key(token_id)
         if not token_key or not slot_id or resident_info is None:
             return
-        self._forget_token_affinity_for_slot_locked(slot_id, preserve_token_key=token_key)
+        self._forget_token_affinity_for_slot_locked(
+            slot_id, preserve_token_key=token_key
+        )
         self._token_resident_affinity[token_key] = slot_id
         resident_info.token_id = int(token_key)
 
@@ -6705,7 +7225,9 @@ class BrowserCaptchaService:
         if not normalized_slot_id:
             return
         async with self._resident_lock:
-            self._mark_resident_slot_unavailable_locked(normalized_slot_id, resident_info=resident_info)
+            self._mark_resident_slot_unavailable_locked(
+                normalized_slot_id, resident_info=resident_info
+            )
         debug_logger.log_warning(
             f"[BrowserCaptcha] slot={normalized_slot_id} 已标记为不可复用，等待恢复或重建 (reason={reason})"
         )
@@ -6750,7 +7272,9 @@ class BrowserCaptchaService:
         target = getattr(tab, "target", None)
         return getattr(target, "browser_context_id", None) if target else None
 
-    async def _dispose_browser_context_quietly(self, browser_context_id: Any, browser_instance=None):
+    async def _dispose_browser_context_quietly(
+        self, browser_context_id: Any, browser_instance=None
+    ):
         target_browser = browser_instance or self.browser
         if browser_context_id is None or not target_browser:
             return
@@ -6774,12 +7298,16 @@ class BrowserCaptchaService:
         try:
             token = await self.db.get_token(int(token_key))
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] 读取 token cookie 失败 (token_id={token_key}): {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 读取 token cookie 失败 (token_id={token_key}): {e}"
+            )
             return None
         cookie_text = str(getattr(token, "cookie", "") or "").strip() if token else ""
         return cookie_text or None
 
-    def _build_cdp_cookie_params(self, browser_cookies: Iterable[Dict[str, Any]]) -> list[Any]:
+    def _build_cdp_cookie_params(
+        self, browser_cookies: Iterable[Dict[str, Any]]
+    ) -> list[Any]:
         from nodriver import cdp
 
         cookie_params: list[Any] = []
@@ -6803,7 +7331,7 @@ class BrowserCaptchaService:
                 cookie_kwargs["domain"] = domain
                 cookie_kwargs["path"] = path
             else:
-                cookie_kwargs["url"] = "https://labs.google/"
+                cookie_kwargs["url"] = "https://flow.google.com/"
                 cookie_kwargs["path"] = path
 
             if "secure" in cookie:
@@ -6818,7 +7346,9 @@ class BrowserCaptchaService:
             expires = cookie.get("expires")
             if expires not in (None, ""):
                 try:
-                    cookie_kwargs["expires"] = cdp.network.TimeSinceEpoch.from_json(float(expires))
+                    cookie_kwargs["expires"] = cdp.network.TimeSinceEpoch.from_json(
+                        float(expires)
+                    )
                 except Exception:
                     pass
 
@@ -6871,7 +7401,9 @@ class BrowserCaptchaService:
 
         browser_cookies = self._build_configured_browser_cookie_targets(cookie_text)
         if not browser_cookies:
-            raise RuntimeError("browser startup cookie enabled but no valid cookie targets were produced")
+            raise RuntimeError(
+                "browser startup cookie enabled but no valid cookie targets were produced"
+            )
 
         cookie_count = await self._set_browser_cookie_targets(
             browser_cookies,
@@ -6880,7 +7412,9 @@ class BrowserCaptchaService:
             timeout_seconds=8.0,
         )
         if cookie_count <= 0:
-            raise RuntimeError("browser startup cookie enabled but no valid cookie params were produced")
+            raise RuntimeError(
+                "browser startup cookie enabled but no valid cookie params were produced"
+            )
 
         target_id = getattr(tab, "target_id", None)
         debug_logger.log_info(
@@ -6922,7 +7456,9 @@ class BrowserCaptchaService:
         return None
 
     @classmethod
-    def _serialize_browser_cookie_for_storage(cls, cookie: Any) -> Optional[Dict[str, Any]]:
+    def _serialize_browser_cookie_for_storage(
+        cls, cookie: Any
+    ) -> Optional[Dict[str, Any]]:
         if isinstance(cookie, dict):
             source = dict(cookie)
         else:
@@ -6962,7 +7498,7 @@ class BrowserCaptchaService:
             serialized["domain"] = domain
             serialized["path"] = path
         else:
-            serialized["url"] = "https://labs.google/"
+            serialized["url"] = "https://flow.google.com/"
             serialized["path"] = path
 
         same_site = cls._normalize_cookie_same_site_text(
@@ -7000,7 +7536,7 @@ class BrowserCaptchaService:
             serialized.pop("domain", None)
             serialized["path"] = "/"
             if "url" not in serialized:
-                serialized["url"] = "https://labs.google/"
+                serialized["url"] = "https://flow.google.com/"
 
         return serialized
 
@@ -7012,11 +7548,17 @@ class BrowserCaptchaService:
         label: str,
     ) -> bool:
         token_key = self._normalize_token_key(token_id)
-        if resident_info is None or not resident_info.tab or not token_key or not self.db:
+        if (
+            resident_info is None
+            or not resident_info.tab
+            or not token_key
+            or not self.db
+        ):
             return False
 
-        browser_context_id = resident_info.browser_context_id or self._extract_tab_browser_context_id(
-            resident_info.tab
+        browser_context_id = (
+            resident_info.browser_context_id
+            or self._extract_tab_browser_context_id(resident_info.tab)
         )
         resident_info.browser_context_id = browser_context_id
         if browser_context_id is None:
@@ -7039,7 +7581,9 @@ class BrowserCaptchaService:
                 return False
 
             previous_cookie_text = await self._load_token_cookie(int(token_key))
-            merged_cookie_text = merge_browser_cookie_payloads(previous_cookie_text, serialized_cookies)
+            merged_cookie_text = merge_browser_cookie_payloads(
+                previous_cookie_text, serialized_cookies
+            )
             if not merged_cookie_text:
                 return False
 
@@ -7086,7 +7630,9 @@ class BrowserCaptchaService:
         cookie_signature = self._normalize_cookie_signature(cookie_text)
 
         if not cookie_signature:
-            self._remember_token_affinity(int(token_key), resident_info.slot_id, resident_info)
+            self._remember_token_affinity(
+                int(token_key), resident_info.slot_id, resident_info
+            )
             resident_info.cookie_signature = None
             return False
 
@@ -7102,7 +7648,10 @@ class BrowserCaptchaService:
             return False
 
         try:
-            browser_context_id = resident_info.browser_context_id or self._extract_tab_browser_context_id(resident_info.tab)
+            browser_context_id = (
+                resident_info.browser_context_id
+                or self._extract_tab_browser_context_id(resident_info.tab)
+            )
             resident_info.browser_context_id = browser_context_id
 
             async def apply_cookie_update():
@@ -7135,7 +7684,9 @@ class BrowserCaptchaService:
             resident_info.cookie_signature = cookie_signature
             resident_info.session_cookies = None
             resident_info.session_cookies_fetched_at = 0.0
-            self._remember_token_affinity(int(token_key), resident_info.slot_id, resident_info)
+            self._remember_token_affinity(
+                int(token_key), resident_info.slot_id, resident_info
+            )
             debug_logger.log_info(
                 f"[BrowserCaptcha] 已向 context 注入 cookie (slot={resident_info.slot_id}, token_id={token_key}, cookies={cookie_count})"
             )
@@ -7159,10 +7710,13 @@ class BrowserCaptchaService:
 
         host = str(parsed.netloc or "").strip().lower()
         path = str(parsed.path or "").strip()
-        return host == "labs.google" and path.rstrip("/") == "/fx/api/auth/providers"
+        return host == "flow.google.com" and (
+            path.rstrip("/") == "/projects" or path.startswith("/project/")
+        )
 
     async def _open_labs_bootstrap_page(self, tab, *, label: str) -> bool:
-        """在 cookie 绑定之后再首跳 labs.google，避免首轮 anchor/reload 丢 cookie。"""
+        """在 Cookie 绑定之后打开当前 Flow 页面。"""
+
         async def _describe_surface(stage: str) -> tuple[str, str]:
             current_url = ""
             ready_state = ""
@@ -7181,7 +7735,8 @@ class BrowserCaptchaService:
                 current_url = ""
 
             try:
-                ready_state = str(
+                ready_state = (
+                    str(
                     await self._tab_evaluate(
                         tab,
                         "document.readyState",
@@ -7189,7 +7744,10 @@ class BrowserCaptchaService:
                         timeout_seconds=2.0,
                     )
                     or ""
-                ).strip().lower()
+                    )
+                    .strip()
+                    .lower()
+                )
             except Exception:
                 ready_state = ""
 
@@ -7197,7 +7755,10 @@ class BrowserCaptchaService:
 
         async def _confirm_labs_surface(reason: str, *, stage: str) -> bool:
             current_url, ready_state = await _describe_surface(stage)
-            if self._is_labs_bootstrap_url(current_url) and ready_state in {"interactive", "complete"}:
+            if self._is_labs_bootstrap_url(current_url) and ready_state in {
+                "interactive",
+                "complete",
+            }:
                 debug_logger.log_warning(
                     "[BrowserCaptcha] labs 引导页命令超时，但页面已落到目标地址 "
                     f"(label={label}, reason={reason}, url={current_url}, "
@@ -7226,12 +7787,20 @@ class BrowserCaptchaService:
                     f"[BrowserCaptcha] 打开 labs 引导页时浏览器运行态断开 ({label}): {e}"
                 )
                 raise
-            debug_logger.log_warning(f"[BrowserCaptcha] 打开 labs 引导页失败 ({label}): {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 打开 labs 引导页失败 ({label}): {e}"
+            )
             return await _confirm_labs_surface(str(e), stage="navigate_timeout")
 
-        if not await self._wait_for_document_ready(tab, retries=20, interval_seconds=0.5):
-            debug_logger.log_warning(f"[BrowserCaptcha] labs 引导页未按时 ready ({label})")
-            return await _confirm_labs_surface("document_not_ready", stage="document_not_ready")
+        if not await self._wait_for_document_ready(
+            tab, retries=20, interval_seconds=0.5
+        ):
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] labs 引导页未按时 ready ({label})"
+            )
+            return await _confirm_labs_surface(
+                "document_not_ready", stage="document_not_ready"
+            )
 
         current_url, ready_state = await _describe_surface("document_ready")
         if self._is_labs_bootstrap_url(current_url):
@@ -7257,13 +7826,16 @@ class BrowserCaptchaService:
         if resident_info is None or not resident_info.tab:
             return False
 
-        browser_context_id = resident_info.browser_context_id or self._extract_tab_browser_context_id(resident_info.tab)
+        browser_context_id = (
+            resident_info.browser_context_id
+            or self._extract_tab_browser_context_id(resident_info.tab)
+        )
         resident_info.browser_context_id = browser_context_id
         if browser_context_id is None:
             return False
 
         warmup_url = "https://www.google.com/"
-        return_url = "https://labs.google/fx/api/auth/providers"
+        return_url = "https://flow.google.com/projects"
 
         try:
             before_cookies = await self._get_browser_cookies(
@@ -7299,7 +7871,9 @@ class BrowserCaptchaService:
                 self._extract_cookie_name_domain(cookie)
                 for cookie in (after_cookies or [])
             }
-            added_pairs = sorted(pair for pair in after_pairs if pair not in before_pairs)
+            added_pairs = sorted(
+                pair for pair in after_pairs if pair not in before_pairs
+            )
             added_preview = ", ".join(
                 f"{name}@{domain or '<host-only>'}"
                 for name, domain in added_pairs[:6]
@@ -7370,30 +7944,37 @@ class BrowserCaptchaService:
             current_token_id == int(token_key)
             and current_cookie_signature == desired_cookie_signature
         ):
-            self._remember_token_affinity(int(token_key), resident_info.slot_id, resident_info)
+            self._remember_token_affinity(
+                int(token_key), resident_info.slot_id, resident_info
+            )
             return True
 
         if not desired_cookie_signature:
             if current_token_id == int(token_key) and not current_cookie_signature:
-                self._remember_token_affinity(int(token_key), resident_info.slot_id, resident_info)
+                self._remember_token_affinity(
+                    int(token_key), resident_info.slot_id, resident_info
+                )
                 resident_info.cookie_signature = None
                 return True
 
             try:
                 from nodriver import cdp
 
-                browser_context_id = resident_info.browser_context_id or self._extract_tab_browser_context_id(resident_info.tab)
+                browser_context_id = (
+                    resident_info.browser_context_id
+                    or self._extract_tab_browser_context_id(resident_info.tab)
+                )
                 resident_info.browser_context_id = browser_context_id
 
                 async with resident_info.solve_lock:
                     if browser_context_id is None:
                         clear_cookie_command = cdp.storage.clear_cookies()
                     else:
-                        clear_cookie_command = cdp.storage.clear_cookies(browser_context_id=browser_context_id)
+                        clear_cookie_command = cdp.storage.clear_cookies(
+                            browser_context_id=browser_context_id
+                        )
                     await self._run_with_timeout(
-                        self.browser.send(
-                            clear_cookie_command
-                        ),
+                        self.browser.send(clear_cookie_command),
                         timeout_seconds=8.0,
                         label=f"storage.clear_cookies:{label}:{token_key}",
                     )
@@ -7412,7 +7993,9 @@ class BrowserCaptchaService:
                         )
                         return False
 
-                    resident_info.recaptcha_ready = await self._wait_for_recaptcha(resident_info.tab)
+                    resident_info.recaptcha_ready = await self._wait_for_recaptcha(
+                        resident_info.tab
+                    )
                     if not resident_info.recaptcha_ready:
                         debug_logger.log_warning(
                             f"[BrowserCaptcha] token_id={token_key} 清空 context cookies 后 reCAPTCHA 未恢复就绪 (slot={resident_info.slot_id})"
@@ -7425,7 +8008,9 @@ class BrowserCaptchaService:
                 )
                 return False
 
-            self._remember_token_affinity(int(token_key), resident_info.slot_id, resident_info)
+            self._remember_token_affinity(
+                int(token_key), resident_info.slot_id, resident_info
+            )
             resident_info.cookie_signature = None
             resident_info.session_cookies = None
             resident_info.session_cookies_fetched_at = 0.0
@@ -7464,14 +8049,18 @@ class BrowserCaptchaService:
                     f"(slot={resident_info.slot_id})"
                 )
 
-            resident_info.recaptcha_ready = await self._wait_for_recaptcha(resident_info.tab)
+            resident_info.recaptcha_ready = await self._wait_for_recaptcha(
+                resident_info.tab
+            )
             if not resident_info.recaptcha_ready:
                 debug_logger.log_warning(
                     f"[BrowserCaptcha] token_id={token_key} cookie 注入后 reCAPTCHA 未恢复就绪 (slot={resident_info.slot_id})"
                 )
                 return False
 
-        self._remember_token_affinity(int(token_key), resident_info.slot_id, resident_info)
+        self._remember_token_affinity(
+            int(token_key), resident_info.slot_id, resident_info
+        )
         return True
 
     def _resolve_resident_slot_for_project_locked(
@@ -7566,7 +8155,9 @@ class BrowserCaptchaService:
         candidates = [
             (slot_id, resident_info)
             for slot_id, resident_info in self._resident_tabs.items()
-            if resident_info and resident_info.tab and slot_id not in self._resident_unavailable_slots
+            if resident_info
+            and resident_info.tab
+            and slot_id not in self._resident_unavailable_slots
         ]
         if not candidates:
             return None, None
@@ -7582,7 +8173,9 @@ class BrowserCaptchaService:
                 token_candidates = [
                     (slot_id, resident_info)
                     for slot_id, resident_info in token_candidates
-                    if not self._is_resident_slot_busy_for_allocation_locked(slot_id, resident_info)
+                    if not self._is_resident_slot_busy_for_allocation_locked(
+                        slot_id, resident_info
+                    )
                 ]
             if token_candidates:
                 token_candidates.sort(
@@ -7594,7 +8187,9 @@ class BrowserCaptchaService:
                     )
                 )
                 pick_index = self._resident_pick_index % len(token_candidates)
-                self._resident_pick_index = (self._resident_pick_index + 1) % max(len(candidates), 1)
+                self._resident_pick_index = (self._resident_pick_index + 1) % max(
+                    len(candidates), 1
+                )
                 return token_candidates[pick_index]
 
         # 共享打码池不再按 project_id 绑定；这里只根据“是否就绪 / 是否空闲 / 使用历史”
@@ -7603,19 +8198,25 @@ class BrowserCaptchaService:
             (slot_id, resident_info)
             for slot_id, resident_info in candidates
             if resident_info.recaptcha_ready
-            and not self._is_resident_slot_busy_for_allocation_locked(slot_id, resident_info)
+            and not self._is_resident_slot_busy_for_allocation_locked(
+                slot_id, resident_info
+            )
         ]
         ready_busy = [
             (slot_id, resident_info)
             for slot_id, resident_info in candidates
             if resident_info.recaptcha_ready
-            and self._is_resident_slot_busy_for_allocation_locked(slot_id, resident_info)
+            and self._is_resident_slot_busy_for_allocation_locked(
+                slot_id, resident_info
+            )
         ]
         cold_idle = [
             (slot_id, resident_info)
             for slot_id, resident_info in candidates
             if not resident_info.recaptcha_ready
-            and not self._is_resident_slot_busy_for_allocation_locked(slot_id, resident_info)
+            and not self._is_resident_slot_busy_for_allocation_locked(
+                slot_id, resident_info
+            )
         ]
 
         if available_only:
@@ -7624,10 +8225,19 @@ class BrowserCaptchaService:
             pool = ready_idle or ready_busy or cold_idle or candidates
         if not pool:
             return None, None
-        pool.sort(key=lambda item: (item[1].last_used_at, item[1].use_count, item[1].created_at, item[0]))
+        pool.sort(
+            key=lambda item: (
+                item[1].last_used_at,
+                item[1].use_count,
+                item[1].created_at,
+                item[0],
+            )
+        )
 
         pick_index = self._resident_pick_index % len(pool)
-        self._resident_pick_index = (self._resident_pick_index + 1) % max(len(candidates), 1)
+        self._resident_pick_index = (self._resident_pick_index + 1) % max(
+            len(candidates), 1
+        )
         return pool[pick_index]
 
     async def _ensure_resident_tab(
@@ -7646,6 +8256,7 @@ class BrowserCaptchaService:
         - 如果所有 tab 都忙且未到上限，继续扩容
         - 到达上限后允许请求排队等待已有 tab
         """
+
         def wrap(slot_id: Optional[str], resident_info: Optional[ResidentTabInfo]):
             return wrap_with_state(slot_id, resident_info, already_reserved=False)
 
@@ -7656,7 +8267,12 @@ class BrowserCaptchaService:
             already_reserved: bool = False,
         ):
             if reserve_for_solve and slot_id and resident_info:
-                if not already_reserved and not self._reserve_resident_slot_for_solve_locked(slot_id, resident_info):
+                if (
+                    not already_reserved
+                    and not self._reserve_resident_slot_for_solve_locked(
+                        slot_id, resident_info
+                    )
+                ):
                     slot_id = None
                     resident_info = None
             if return_slot_key:
@@ -7672,7 +8288,12 @@ class BrowserCaptchaService:
                 available_only=reserve_for_solve,
             )
             at_capacity = len(self._resident_tabs) >= self._max_resident_tabs
-            if reserve_for_solve and not force_create and at_capacity and (resident_info is None or not slot_id):
+            if (
+                reserve_for_solve
+                and not force_create
+                and at_capacity
+                and (resident_info is None or not slot_id)
+            ):
                 preferred_wait_slot_id = self._resolve_token_affinity_slot_locked(
                     token_id,
                     available_only=False,
@@ -7687,7 +8308,9 @@ class BrowserCaptchaService:
             ]
             if available_infos:
                 all_busy = all(
-                    self._is_resident_slot_busy_for_allocation_locked(candidate_slot_id, info)
+                    self._is_resident_slot_busy_for_allocation_locked(
+                        candidate_slot_id, info
+                    )
                     for candidate_slot_id, info in available_infos
                 )
             else:
@@ -7718,10 +8341,12 @@ class BrowserCaptchaService:
             )
             if waited:
                 async with self._resident_lock:
-                    slot_id, resident_info = self._resolve_resident_slot_for_project_locked(
+                    slot_id, resident_info = (
+                        self._resolve_resident_slot_for_project_locked(
                         project_id,
                         token_id=token_id,
                         available_only=reserve_for_solve,
+                    )
                     )
                     if slot_id and resident_info:
                         debug_logger.log_info(
@@ -7750,14 +8375,18 @@ class BrowserCaptchaService:
                 ]
                 if available_infos:
                     all_busy = all(
-                        self._is_resident_slot_busy_for_allocation_locked(candidate_slot_id, info)
+                        self._is_resident_slot_busy_for_allocation_locked(
+                            candidate_slot_id, info
+                        )
                         for candidate_slot_id, info in available_infos
                     )
                 else:
                     all_busy = True
                 token_key = self._normalize_token_key(token_id)
                 token_slot_matched = bool(
-                    token_key and resident_info and resident_info.token_id == int(token_key)
+                    token_key
+                    and resident_info
+                    and resident_info.token_id == int(token_key)
                 )
 
                 should_create = (
@@ -7783,10 +8412,12 @@ class BrowserCaptchaService:
 
             if created_slot_id is not None and created_resident_info is None:
                 async with self._resident_lock:
-                    slot_id, fallback_info = self._resolve_resident_slot_for_project_locked(
+                    slot_id, fallback_info = (
+                        self._resolve_resident_slot_for_project_locked(
                         project_id,
                         token_id=token_id,
                         available_only=reserve_for_solve,
+                    )
                     )
                 return wrap(slot_id, fallback_info)
 
@@ -7794,8 +8425,12 @@ class BrowserCaptchaService:
                 async with self._resident_lock:
                     self._resident_tabs[created_slot_id] = created_resident_info
                     self._clear_resident_slot_unavailable_locked(created_slot_id)
-                    self._remember_token_affinity(token_id, created_slot_id, created_resident_info)
-                    self._remember_project_affinity(project_id, created_slot_id, created_resident_info)
+                    self._remember_token_affinity(
+                        token_id, created_slot_id, created_resident_info
+                    )
+                    self._remember_project_affinity(
+                        project_id, created_slot_id, created_resident_info
+                    )
                     self._sync_compat_resident_state()
                     return wrap(created_slot_id, created_resident_info)
 
@@ -7807,35 +8442,45 @@ class BrowserCaptchaService:
             )
             if waited:
                 async with self._resident_lock:
-                    slot_id, resident_info = self._resolve_specific_resident_slot_locked(
+                    slot_id, resident_info = (
+                        self._resolve_specific_resident_slot_locked(
                         deferred_wait_slot_id,
                         reserve_for_solve=reserve_for_solve,
+                    )
                     )
                     if slot_id and resident_info:
                         debug_logger.log_info(
                             "[BrowserCaptcha] 热 slot 长等待命中，避免新增 resident tab "
                             f"(project_id={project_id or '<empty>'}, token_id={token_id}, slot={slot_id})"
                         )
-                        return wrap_with_state(slot_id, resident_info, already_reserved=True)
+                        return wrap_with_state(
+                            slot_id, resident_info, already_reserved=True
+                        )
 
             async with self._tab_build_lock:
                 async with self._resident_lock:
-                    slot_id, resident_info = self._resolve_resident_slot_for_project_locked(
+                    slot_id, resident_info = (
+                        self._resolve_resident_slot_for_project_locked(
                         project_id,
                         token_id=token_id,
                         available_only=reserve_for_solve,
+                    )
                     )
                     if slot_id and resident_info:
                         return wrap(slot_id, resident_info)
                     new_slot_id = self._next_resident_slot_id()
 
-                resident_info = await self._create_resident_tab(new_slot_id, project_id=project_id, token_id=token_id)
+                resident_info = await self._create_resident_tab(
+                    new_slot_id, project_id=project_id, token_id=token_id
+                )
                 if resident_info is None:
                     async with self._resident_lock:
-                        slot_id, fallback_info = self._resolve_resident_slot_for_project_locked(
+                        slot_id, fallback_info = (
+                            self._resolve_resident_slot_for_project_locked(
                             project_id,
                             token_id=token_id,
                             available_only=reserve_for_solve,
+                        )
                         )
                     return wrap(slot_id, fallback_info)
 
@@ -7843,7 +8488,9 @@ class BrowserCaptchaService:
                     self._resident_tabs[new_slot_id] = resident_info
                     self._clear_resident_slot_unavailable_locked(new_slot_id)
                     self._remember_token_affinity(token_id, new_slot_id, resident_info)
-                    self._remember_project_affinity(project_id, new_slot_id, resident_info)
+                    self._remember_project_affinity(
+                        project_id, new_slot_id, resident_info
+                    )
                     self._sync_compat_resident_state()
                     return wrap(new_slot_id, resident_info)
 
@@ -7857,12 +8504,17 @@ class BrowserCaptchaService:
         return_slot_key: bool = False,
     ):
         """重建共享池中的一个标签页。优先重建当前项目最近使用的 slot。"""
-        def wrap(actual_slot_id: Optional[str], resident_info: Optional[ResidentTabInfo]):
+
+        def wrap(
+            actual_slot_id: Optional[str], resident_info: Optional[ResidentTabInfo]
+        ):
             if return_slot_key:
                 return actual_slot_id, resident_info
             return resident_info
 
-        async def finalize(actual_slot_id: Optional[str], resident_info: Optional[ResidentTabInfo]):
+        async def finalize(
+            actual_slot_id: Optional[str], resident_info: Optional[ResidentTabInfo]
+        ):
             resolved_slot_id = actual_slot_id
             resolved_resident = resident_info
             if reserve_for_solve and resolved_slot_id and resolved_resident:
@@ -7877,11 +8529,14 @@ class BrowserCaptchaService:
                         resolved_slot_id = None
                         resolved_resident = None
             return wrap(resolved_slot_id, resolved_resident)
+
         pending_task = None
         async with self._resident_lock:
             actual_slot_id = slot_id
             if actual_slot_id is None:
-                actual_slot_id, _ = self._resolve_resident_slot_for_project_locked(project_id, token_id=token_id)
+                actual_slot_id, _ = self._resolve_resident_slot_for_project_locked(
+                    project_id, token_id=token_id
+                )
             if actual_slot_id:
                 existing_task = self._resident_rebuild_tasks.get(actual_slot_id)
                 if existing_task and not existing_task.done():
@@ -7899,7 +8554,11 @@ class BrowserCaptchaService:
         async def _runner(resolved_slot_id: Optional[str]):
             async with self._tab_build_lock:
                 async with self._resident_lock:
-                    old_resident = self._resident_tabs.pop(resolved_slot_id, None) if resolved_slot_id else None
+                    old_resident = (
+                        self._resident_tabs.pop(resolved_slot_id, None)
+                        if resolved_slot_id
+                        else None
+                    )
                     self._forget_token_affinity_for_slot_locked(resolved_slot_id)
                     self._forget_project_affinity_for_slot_locked(resolved_slot_id)
                     if resolved_slot_id:
@@ -7908,14 +8567,18 @@ class BrowserCaptchaService:
 
                 if old_resident:
                     try:
-                        await self._dispose_browser_context_quietly(old_resident.browser_context_id)
+                        await self._dispose_browser_context_quietly(
+                            old_resident.browser_context_id
+                        )
                         async with old_resident.solve_lock:
                             await self._close_tab_quietly(old_resident.tab)
                     except Exception:
                         await self._close_tab_quietly(old_resident.tab)
 
                 next_slot_id = resolved_slot_id or self._next_resident_slot_id()
-                resident_info = await self._create_resident_tab(next_slot_id, project_id=project_id, token_id=token_id)
+                resident_info = await self._create_resident_tab(
+                    next_slot_id, project_id=project_id, token_id=token_id
+                )
                 if resident_info is None:
                     debug_logger.log_warning(
                         f"[BrowserCaptcha] slot={next_slot_id}, project_id={project_id}, token_id={token_id} 重建共享标签页失败"
@@ -7926,7 +8589,9 @@ class BrowserCaptchaService:
                     self._resident_tabs[next_slot_id] = resident_info
                     self._clear_resident_slot_unavailable_locked(next_slot_id)
                     self._remember_token_affinity(token_id, next_slot_id, resident_info)
-                    self._remember_project_affinity(project_id, next_slot_id, resident_info)
+                    self._remember_project_affinity(
+                        project_id, next_slot_id, resident_info
+                    )
                     self._sync_compat_resident_state()
                     return next_slot_id, resident_info
 
@@ -7957,7 +8622,10 @@ class BrowserCaptchaService:
             finally:
                 if created_task:
                     async with self._resident_lock:
-                        if self._resident_rebuild_tasks.get(actual_slot_id) is rebuild_task:
+                        if (
+                            self._resident_rebuild_tasks.get(actual_slot_id)
+                            is rebuild_task
+                        ):
                             self._resident_rebuild_tasks.pop(actual_slot_id, None)
             return await finalize(*result)
 
@@ -7998,7 +8666,10 @@ class BrowserCaptchaService:
         finally:
             if created_task:
                 async with self._resident_lock:
-                    if self._resident_recovery_tasks.get(normalized_slot_id) is recovery_task:
+                    if (
+                        self._resident_recovery_tasks.get(normalized_slot_id)
+                        is recovery_task
+                    ):
                         self._resident_recovery_tasks.pop(normalized_slot_id, None)
 
     def _sync_compat_resident_state(self):
@@ -8030,7 +8701,9 @@ class BrowserCaptchaService:
 
     async def _disconnect_connection_quietly(self, connection, *, reason: str):
         """尽量关闭任意 nodriver 连接对象，回收 listener task 与未完成 transaction。"""
-        disconnect_method = getattr(connection, "disconnect", None) if connection else None
+        disconnect_method = (
+            getattr(connection, "disconnect", None) if connection else None
+        )
         if disconnect_method is None:
             return
 
@@ -8071,7 +8744,10 @@ class BrowserCaptchaService:
                 except Exception:
                     pass
 
-            if isinstance(listener_task, asyncio.Task) and listener_task is not asyncio.current_task():
+            if (
+                isinstance(listener_task, asyncio.Task)
+                and listener_task is not asyncio.current_task()
+            ):
                 if not listener_task.done():
                     try:
                         await self._run_with_timeout(
@@ -8112,7 +8788,9 @@ class BrowserCaptchaService:
 
             await asyncio.sleep(0)
 
-    async def _disconnect_browser_connection_quietly(self, browser_instance, reason: str):
+    async def _disconnect_browser_connection_quietly(
+        self, browser_instance, reason: str
+    ):
         """尽量先关闭 DevTools websocket，减少 nodriver 后台任务在浏览器退场时炸栈。"""
         if not browser_instance:
             return
@@ -8196,10 +8874,14 @@ class BrowserCaptchaService:
 
         for raw_path in candidates:
             normalized_path = str(raw_path or "").strip()
-            if not normalized_path or not self._is_runtime_managed_profile_dir(normalized_path):
+            if not normalized_path or not self._is_runtime_managed_profile_dir(
+                normalized_path
+            ):
                 continue
             try:
-                resolved = os.path.normcase(os.path.normpath(str(Path(normalized_path).resolve())))
+                resolved = os.path.normcase(
+                    os.path.normpath(str(Path(normalized_path).resolve()))
+                )
             except Exception:
                 resolved = os.path.normcase(os.path.normpath(normalized_path))
             if resolved in seen:
@@ -8209,7 +8891,9 @@ class BrowserCaptchaService:
 
         return profile_dirs
 
-    def _find_browser_pids_for_profile_dirs(self, profile_dirs: Iterable[str]) -> list[int]:
+    def _find_browser_pids_for_profile_dirs(
+        self, profile_dirs: Iterable[str]
+    ) -> list[int]:
         normalized_profile_dirs = [
             os.path.normcase(os.path.normpath(str(item or "").strip()))
             for item in profile_dirs
@@ -8219,7 +8903,14 @@ class BrowserCaptchaService:
             return []
 
         found_pids: set[int] = set()
-        browser_names = {"chrome.exe", "chromium.exe", "msedge.exe", "chrome", "chromium", "msedge"}
+        browser_names = {
+            "chrome.exe",
+            "chromium.exe",
+            "msedge.exe",
+            "chrome",
+            "chromium",
+            "msedge",
+        }
 
         if sys.platform.startswith("win"):
             try:
@@ -8252,10 +8943,15 @@ class BrowserCaptchaService:
                     command_line = os.path.normcase(
                         os.path.normpath(str(item.get("CommandLine") or ""))
                     )
-                    if pid > 0 and any(profile_dir in command_line for profile_dir in normalized_profile_dirs):
+                    if pid > 0 and any(
+                        profile_dir in command_line
+                        for profile_dir in normalized_profile_dirs
+                    ):
                         found_pids.add(pid)
             except Exception as e:
-                debug_logger.log_warning(f"[BrowserCaptcha] 扫描浏览器残留进程失败: {e}")
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] 扫描浏览器残留进程失败: {e}"
+                )
             return sorted(found_pids)
 
         proc_dir = Path("/proc")
@@ -8266,21 +8962,37 @@ class BrowserCaptchaService:
                 continue
             try:
                 pid = int(child.name)
-                comm = (child / "comm").read_text(encoding="utf-8", errors="ignore").strip()
+                comm = (
+                    (child / "comm")
+                    .read_text(encoding="utf-8", errors="ignore")
+                    .strip()
+                )
                 if comm not in browser_names:
                     continue
-                command_line = (child / "cmdline").read_bytes().decode(
+                command_line = (
+                    (child / "cmdline")
+                    .read_bytes()
+                    .decode(
                     "utf-8",
                     errors="ignore",
-                ).replace("\x00", " ")
-                normalized_command_line = os.path.normcase(os.path.normpath(command_line))
-                if any(profile_dir in normalized_command_line for profile_dir in normalized_profile_dirs):
+                    )
+                    .replace("\x00", " ")
+                )
+                normalized_command_line = os.path.normcase(
+                    os.path.normpath(command_line)
+                )
+                if any(
+                    profile_dir in normalized_command_line
+                    for profile_dir in normalized_profile_dirs
+                ):
                     found_pids.add(pid)
             except Exception:
                 continue
         return sorted(found_pids)
 
-    def _terminate_browser_processes_for_profile_dirs(self, profile_dirs: Iterable[str], *, reason: str) -> int:
+    def _terminate_browser_processes_for_profile_dirs(
+        self, profile_dirs: Iterable[str], *, reason: str
+    ) -> int:
         pids = self._find_browser_pids_for_profile_dirs(profile_dirs)
         killed_count = 0
         for pid in pids:
@@ -8292,18 +9004,25 @@ class BrowserCaptchaService:
             )
         return killed_count
 
-    async def _stop_browser_process(self, browser_instance, reason: str = "browser_stop"):
+    async def _stop_browser_process(
+        self, browser_instance, reason: str = "browser_stop"
+    ):
         """兼容 nodriver 同步 stop API，安全停止浏览器进程。"""
         if not browser_instance:
             return
 
         process = getattr(browser_instance, "_process", None)
-        browser_pid = self._get_browser_process_pid(browser_instance) or self._browser_process_pid
+        browser_pid = (
+            self._get_browser_process_pid(browser_instance) or self._browser_process_pid
+        )
         profile_dirs = self._collect_runtime_profile_process_targets()
         connection = getattr(browser_instance, "connection", None)
-        await self._disconnect_browser_connection_quietly(browser_instance, reason=reason)
+        await self._disconnect_browser_connection_quietly(
+            browser_instance, reason=reason
+        )
 
         if connection is not None:
+
             async def _noop_disconnect(_self):
                 return None
 
@@ -8327,7 +9046,9 @@ class BrowserCaptchaService:
                         label="browser.stop",
                     )
             except Exception as e:
-                debug_logger.log_warning(f"[BrowserCaptcha] browser.stop 异常 ({reason}): {e}")
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] browser.stop 异常 ({reason}): {e}"
+                )
 
         if process is not None:
             for stream_name in ("stdin", "stdout", "stderr"):
@@ -8469,31 +9190,47 @@ class BrowserCaptchaService:
             return None, None, None, None, None
         try:
             captcha_cfg = await self.db.get_captcha_config()
-            browser_proxy_pool = str(getattr(captcha_cfg, "browser_proxy_pool", "") or "").strip()
+            browser_proxy_pool = str(
+                getattr(captcha_cfg, "browser_proxy_pool", "") or ""
+            ).strip()
             if browser_proxy_pool:
                 pooled_proxy = await self.db.pick_browser_proxy_from_pool()
                 if pooled_proxy:
-                    debug_logger.log_info(f"[BrowserCaptcha] Personal 使用验证码代理池: {pooled_proxy}")
+                    debug_logger.log_info(
+                        f"[BrowserCaptcha] Personal 使用验证码代理池: {pooled_proxy}"
+                    )
                     return _parse_proxy_url(pooled_proxy)
-            if getattr(captcha_cfg, "browser_proxy_enabled", False) and getattr(captcha_cfg, "browser_proxy_url", None):
+            if getattr(captcha_cfg, "browser_proxy_enabled", False) and getattr(
+                captcha_cfg, "browser_proxy_url", None
+            ):
                 url = str(getattr(captcha_cfg, "browser_proxy_url", "") or "").strip()
                 if url:
-                    debug_logger.log_info(f"[BrowserCaptcha] Personal 使用验证码代理: {url}")
+                    debug_logger.log_info(
+                        f"[BrowserCaptcha] Personal 使用验证码代理: {url}"
+                    )
                     return _parse_proxy_url(url)
         except Exception as e:
             debug_logger.log_warning(f"[BrowserCaptcha] 读取验证码代理配置失败: {e}")
         try:
             proxy_cfg = await self.db.get_proxy_config()
             proxy_pool_text = str(getattr(proxy_cfg, "proxy_pool", "") or "")
-            proxy_pool_candidates = [item.strip() for item in re.split(r"[\r\n,]+", proxy_pool_text) if item.strip()]
+            proxy_pool_candidates = [
+                item.strip()
+                for item in re.split(r"[\r\n,]+", proxy_pool_text)
+                if item.strip()
+            ]
             if proxy_cfg and proxy_cfg.enabled and proxy_pool_candidates:
                 pooled_proxy = proxy_pool_candidates[0]
-                debug_logger.log_info(f"[BrowserCaptcha] Personal 回退使用请求代理池: {pooled_proxy}")
+                debug_logger.log_info(
+                    f"[BrowserCaptcha] Personal 回退使用请求代理池: {pooled_proxy}"
+                )
                 return _parse_proxy_url(pooled_proxy)
             if proxy_cfg and proxy_cfg.enabled and proxy_cfg.proxy_url:
                 url = proxy_cfg.proxy_url.strip()
                 if url:
-                    debug_logger.log_info(f"[BrowserCaptcha] Personal 回退使用请求代理: {url}")
+                    debug_logger.log_info(
+                        f"[BrowserCaptcha] Personal 回退使用请求代理: {url}"
+                    )
                     return _parse_proxy_url(url)
         except Exception as e:
             debug_logger.log_warning(f"[BrowserCaptcha] 读取请求代理配置失败: {e}")
@@ -8504,7 +9241,9 @@ class BrowserCaptchaService:
                 continue
             if str(host).strip().lower() not in {"127.0.0.1", "localhost", "::1"}:
                 continue
-            if not await self._is_tcp_endpoint_reachable(str(host), int(port), timeout_seconds=0.5):
+            if not await self._is_tcp_endpoint_reachable(
+                str(host), int(port), timeout_seconds=0.5
+            ):
                 continue
             debug_logger.log_info(
                 f"[BrowserCaptcha] Personal 自动接管本机可用代理: {candidate_url}"
@@ -8562,7 +9301,9 @@ class BrowserCaptchaService:
         protocol, host, port, username, password = await self._resolve_personal_proxy()
         return _compose_proxy_url(protocol, host, port, username, password)
 
-    async def _download_recaptcha_asset_bytes(self, remote_url: str) -> tuple[bytes, str]:
+    async def _download_recaptcha_asset_bytes(
+        self, remote_url: str
+    ) -> tuple[bytes, str]:
         """Download a reCAPTCHA-related static asset through the same proxy path."""
         proxy_url = await self._resolve_personal_proxy_download_url()
         async with AsyncSession() as session:
@@ -8586,22 +9327,31 @@ class BrowserCaptchaService:
 
     async def _load_recaptcha_asset_bytes(self, remote_url: str) -> tuple[bytes, str]:
         """Load a static asset from local cache first, then refresh from upstream."""
-        cache_path = _get_recaptcha_asset_cache_path(self._recaptcha_asset_cache_dir, remote_url)
+        cache_path = _get_recaptcha_asset_cache_path(
+            self._recaptcha_asset_cache_dir, remote_url
+        )
 
         async with self._recaptcha_asset_cache_lock:
             if cache_path.exists():
                 try:
                     cached_content = cache_path.read_bytes()
                     cache_age = max(0.0, time.time() - cache_path.stat().st_mtime)
-                    if cached_content and cache_age <= RECAPTCHA_ASSET_CACHE_TTL_SECONDS:
-                        return cached_content, _guess_recaptcha_asset_mime_type(remote_url)
+                    if (
+                        cached_content
+                        and cache_age <= RECAPTCHA_ASSET_CACHE_TTL_SECONDS
+                    ):
+                        return cached_content, _guess_recaptcha_asset_mime_type(
+                            remote_url
+                        )
                 except Exception as e:
                     debug_logger.log_warning(
                         f"[BrowserCaptcha] 读取本地静态资源缓存失败: path={cache_path.name}, error={e}"
                     )
 
             try:
-                content, mime_type = await self._download_recaptcha_asset_bytes(remote_url)
+                content, mime_type = await self._download_recaptcha_asset_bytes(
+                    remote_url
+                )
                 _write_binary_cache(cache_path, content)
                 return content, mime_type
             except Exception as e:
@@ -8612,12 +9362,16 @@ class BrowserCaptchaService:
                             debug_logger.log_warning(
                                 f"[BrowserCaptcha] 静态资源下载失败，回退使用本地缓存: url={remote_url}, error={e}"
                             )
-                            return cached_content, _guess_recaptcha_asset_mime_type(remote_url)
+                            return cached_content, _guess_recaptcha_asset_mime_type(
+                                remote_url
+                            )
                     except Exception:
                         pass
                 raise
 
-    async def _discover_dynamic_recaptcha_static_urls(self, bootstrap_source: str) -> list[str]:
+    async def _discover_dynamic_recaptcha_static_urls(
+        self, bootstrap_source: str
+    ) -> list[str]:
         """Recursively discover reCAPTCHA static assets from bootstrap/JS/CSS content."""
         discovered: list[str] = []
         seen: set[str] = set()
@@ -8625,7 +9379,11 @@ class BrowserCaptchaService:
 
         def _queue(remote_url: str):
             normalized = str(remote_url or "").strip()
-            if not normalized or not _is_localizable_recaptcha_asset_url(normalized) or normalized in seen:
+            if (
+                not normalized
+                or not _is_localizable_recaptcha_asset_url(normalized)
+                or normalized in seen
+            ):
                 return
             seen.add(normalized)
             pending.append(normalized)
@@ -8649,7 +9407,9 @@ class BrowserCaptchaService:
                 )
                 continue
 
-            normalized_mime_type = _guess_recaptcha_asset_mime_type(remote_url, mime_type)
+            normalized_mime_type = _guess_recaptcha_asset_mime_type(
+                remote_url, mime_type
+            )
             if normalized_mime_type == "text/css":
                 css_source = content.decode("utf-8", errors="ignore")
                 for child_url in _extract_remote_urls_from_css(css_source, remote_url):
@@ -8675,9 +9435,15 @@ class BrowserCaptchaService:
             for child_url in _extract_remote_urls_from_css(css_source, remote_url):
                 if not _is_localizable_recaptcha_asset_url(child_url):
                     continue
-                replacements[child_url] = await self._build_recaptcha_asset_data_url(child_url)
-            localized_css = _rewrite_css_urls_with_local_assets(css_source, remote_url, replacements)
-            data_url = _build_data_url(localized_css.encode("utf-8"), "text/css;charset=utf-8")
+                replacements[child_url] = await self._build_recaptcha_asset_data_url(
+                    child_url
+                )
+            localized_css = _rewrite_css_urls_with_local_assets(
+                css_source, remote_url, replacements
+            )
+            data_url = _build_data_url(
+                localized_css.encode("utf-8"), "text/css;charset=utf-8"
+            )
         else:
             if normalized_mime_type in {"text/javascript", "application/javascript"}:
                 js_source = content.decode("utf-8", errors="ignore")
@@ -8685,9 +9451,15 @@ class BrowserCaptchaService:
                 for child_url in _extract_remote_urls_from_text(js_source):
                     if not _is_localizable_recaptcha_asset_url(child_url):
                         continue
-                    replacements[child_url] = await self._build_recaptcha_asset_data_url(child_url)
-                localized_js = _rewrite_text_urls_with_local_assets(js_source, replacements)
-                data_url = _build_data_url(localized_js.encode("utf-8"), "text/javascript;charset=utf-8")
+                    replacements[
+                        child_url
+                    ] = await self._build_recaptcha_asset_data_url(child_url)
+                localized_js = _rewrite_text_urls_with_local_assets(
+                    js_source, replacements
+                )
+                data_url = _build_data_url(
+                    localized_js.encode("utf-8"), "text/javascript;charset=utf-8"
+                )
             else:
                 data_url = _build_data_url(content, normalized_mime_type)
 
@@ -8701,9 +9473,11 @@ class BrowserCaptchaService:
     ) -> Dict[str, Any]:
         """Build a compact rewrite bundle for local reCAPTCHA static assets."""
         candidate_url_list = [url for url in bootstrap_candidate_urls if url]
-        signature_input = "||".join(candidate_url_list) + "||" + hashlib.md5(
-            bootstrap_source.encode("utf-8")
-        ).hexdigest()
+        signature_input = (
+            "||".join(candidate_url_list)
+            + "||"
+            + hashlib.md5(bootstrap_source.encode("utf-8")).hexdigest()
+        )
         signature = hashlib.md5(signature_input.encode("utf-8")).hexdigest()
         if (
             self._recaptcha_asset_bundle_signature == signature
@@ -8720,7 +9494,9 @@ class BrowserCaptchaService:
                 full_map[alias_url] = data_key
                 parsed = urlparse(alias_url)
                 if parsed.path:
-                    path_key = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+                    path_key = parsed.path + (
+                        f"?{parsed.query}" if parsed.query else ""
+                    )
                     path_map[path_key] = data_key
                     if not parsed.query:
                         path_map[parsed.path] = data_key
@@ -8733,7 +9509,9 @@ class BrowserCaptchaService:
         for candidate_url in candidate_url_list:
             _register_aliases(candidate_url, bootstrap_key)
 
-        static_urls = await self._discover_dynamic_recaptcha_static_urls(bootstrap_source)
+        static_urls = await self._discover_dynamic_recaptcha_static_urls(
+            bootstrap_source
+        )
 
         asset_index = 0
         for remote_url in static_urls:
@@ -8973,7 +9751,9 @@ class BrowserCaptchaService:
             debug_logger.log_info("[BrowserCaptcha] 已注入本地 reCAPTCHA 静态资源映射")
             return True
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] 注入本地 reCAPTCHA 静态资源映射失败: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 注入本地 reCAPTCHA 静态资源映射失败: {e}"
+            )
             return False
 
     async def _download_recaptcha_bootstrap_source(self, remote_url: str) -> str:
@@ -9003,12 +9783,16 @@ class BrowserCaptchaService:
         candidate_urls: Optional[Iterable[str]] = None,
     ) -> str:
         """Load the bootstrap source from local cache first, then refresh from upstream."""
-        urls = list(candidate_urls or self._get_recaptcha_bootstrap_candidate_urls(script_path))
+        urls = list(
+            candidate_urls or self._get_recaptcha_bootstrap_candidate_urls(script_path)
+        )
         stale_cache_candidates: list[tuple[str, Path]] = []
 
         async with self._recaptcha_script_cache_lock:
             for remote_url in urls:
-                cache_path = _get_recaptcha_script_cache_path(self._recaptcha_script_cache_dir, remote_url)
+                cache_path = _get_recaptcha_script_cache_path(
+                    self._recaptcha_script_cache_dir, remote_url
+                )
                 if not cache_path.exists():
                     continue
 
@@ -9035,7 +9819,9 @@ class BrowserCaptchaService:
             for remote_url in urls:
                 try:
                     source = await self._download_recaptcha_bootstrap_source(remote_url)
-                    cache_path = _get_recaptcha_script_cache_path(self._recaptcha_script_cache_dir, remote_url)
+                    cache_path = _get_recaptcha_script_cache_path(
+                        self._recaptcha_script_cache_dir, remote_url
+                    )
                     _write_text_cache(cache_path, source)
                     debug_logger.log_info(
                         f"[BrowserCaptcha] 已刷新 reCAPTCHA bootstrap 本地缓存: {cache_path.name}"
@@ -9075,7 +9861,9 @@ class BrowserCaptchaService:
             website_key=website_key,
         )
 
-        await self._tab_evaluate(tab, f"""
+        await self._tab_evaluate(
+            tab,
+            f"""
             (() => {{
                 const forceRemote = {json.dumps(force_remote)};
                 const stateKey = '__flow2apiRecaptchaBootstrapState';
@@ -9181,8 +9969,13 @@ class BrowserCaptchaService:
                 }};
                 loadScript(0);
             }})()
-        """, label=label, timeout_seconds=5.0)
-        debug_logger.log_info(f"[BrowserCaptcha] 已注入远程 reCAPTCHA bootstrap ({script_path})")
+        """,
+            label=label,
+            timeout_seconds=5.0,
+        )
+        debug_logger.log_info(
+            f"[BrowserCaptcha] 已注入远程 reCAPTCHA bootstrap ({script_path})"
+        )
         return "remote"
 
     async def initialize(self):
@@ -9197,7 +9990,9 @@ class BrowserCaptchaService:
         ):
             self._mark_runtime_active()
             if self._idle_reaper_task is None or self._idle_reaper_task.done():
-                self._idle_reaper_task = asyncio.create_task(self._idle_tab_reaper_loop())
+                self._idle_reaper_task = asyncio.create_task(
+                    self._idle_tab_reaper_loop()
+                )
             return
 
         self._raise_if_browser_launch_cooling_down()
@@ -9213,35 +10008,55 @@ class BrowserCaptchaService:
             if self._initialized and self.browser:
                 try:
                     if self.browser.stopped:
-                        debug_logger.log_warning("[BrowserCaptcha] 浏览器已停止，准备重新初始化...")
+                        debug_logger.log_warning(
+                            "[BrowserCaptcha] 浏览器已停止，准备重新初始化..."
+                        )
                         self._mark_browser_health(False)
                         browser_needs_restart = True
                     elif getattr(self.browser, "_flow2api_runtime_disconnected", False):
-                        debug_logger.log_warning("[BrowserCaptcha] 浏览器连接已标记断开，准备重新初始化...")
+                        debug_logger.log_warning(
+                            "[BrowserCaptcha] 浏览器连接已标记断开，准备重新初始化..."
+                        )
                         self._mark_browser_health(False)
                         browser_needs_restart = True
                     elif self._is_browser_health_fresh():
                         self._mark_runtime_active()
-                        if self._idle_reaper_task is None or self._idle_reaper_task.done():
-                            self._idle_reaper_task = asyncio.create_task(self._idle_tab_reaper_loop())
+                        if (
+                            self._idle_reaper_task is None
+                            or self._idle_reaper_task.done()
+                        ):
+                            self._idle_reaper_task = asyncio.create_task(
+                                self._idle_tab_reaper_loop()
+                            )
                         return
                     elif not await self._probe_browser_runtime():
-                        debug_logger.log_warning("[BrowserCaptcha] 浏览器连接已失活，准备重新初始化...")
+                        debug_logger.log_warning(
+                            "[BrowserCaptcha] 浏览器连接已失活，准备重新初始化..."
+                        )
                         browser_needs_restart = True
                     else:
                         _patch_nodriver_runtime(self.browser)
                         self._mark_runtime_active()
-                        if self._idle_reaper_task is None or self._idle_reaper_task.done():
-                            self._idle_reaper_task = asyncio.create_task(self._idle_tab_reaper_loop())
+                        if (
+                            self._idle_reaper_task is None
+                            or self._idle_reaper_task.done()
+                        ):
+                            self._idle_reaper_task = asyncio.create_task(
+                                self._idle_tab_reaper_loop()
+                            )
                         return
                 except Exception as e:
-                    debug_logger.log_warning(f"[BrowserCaptcha] 浏览器状态检查异常，准备重新初始化: {e}")
+                    debug_logger.log_warning(
+                        f"[BrowserCaptcha] 浏览器状态检查异常，准备重新初始化: {e}"
+                    )
                     browser_needs_restart = True
             elif self.browser is not None or self._initialized:
                 browser_needs_restart = True
 
             if browser_needs_restart:
-                await self._shutdown_browser_runtime_locked(reason="initialize_recovery")
+                await self._shutdown_browser_runtime_locked(
+                    reason="initialize_recovery"
+                )
 
             launch_gate = self._get_global_browser_launch_gate()
             if launch_gate.locked():
@@ -9252,7 +10067,9 @@ class BrowserCaptchaService:
             async with launch_gate:
                 try:
                     if self.user_data_dir:
-                        debug_logger.log_info(f"[BrowserCaptcha] 正在启动 nodriver 浏览器 (用户数据目录: {self.user_data_dir})...")
+                        debug_logger.log_info(
+                            f"[BrowserCaptcha] 正在启动 nodriver 浏览器 (用户数据目录: {self.user_data_dir})..."
+                        )
                         os.makedirs(self.user_data_dir, exist_ok=True)
                     else:
                         debug_logger.log_info(
@@ -9260,7 +10077,9 @@ class BrowserCaptchaService:
                             "(使用独立临时目录，隔离真实资料)..."
                         )
 
-                    browser_executable_path, browser_source = _resolve_browser_executable_path()
+                    browser_executable_path, browser_source = (
+                        _resolve_browser_executable_path()
+                    )
                     if browser_executable_path and browser_source == "configured":
                         debug_logger.log_info(
                             f"[BrowserCaptcha] 使用显式配置的浏览器作为 nodriver 浏览器: {browser_executable_path}"
@@ -9273,12 +10092,22 @@ class BrowserCaptchaService:
                     # 解析代理配置
                     self._cleanup_proxy_extension()
                     self._proxy_url = None
-                    protocol, host, port, username, password = await self._resolve_personal_proxy()
-                    self._proxy_config_signature = await self._build_proxy_config_signature()
+                    (
+                        protocol,
+                        host,
+                        port,
+                        username,
+                        password,
+                    ) = await self._resolve_personal_proxy()
+                    self._proxy_config_signature = (
+                        await self._build_proxy_config_signature()
+                    )
                     proxy_server_arg = None
                     if protocol and host and port:
                         if username and password:
-                            self._proxy_ext_dir = _create_proxy_auth_extension(protocol, host, port, username, password)
+                            self._proxy_ext_dir = _create_proxy_auth_extension(
+                                protocol, host, port, username, password
+                            )
                             debug_logger.log_info(
                                 f"[BrowserCaptcha] Personal 代理需要认证，已创建扩展: {self._proxy_ext_dir}"
                             )
@@ -9286,9 +10115,13 @@ class BrowserCaptchaService:
                                 "[BrowserCaptcha] Personal 认证代理改由扩展接管，跳过命令行 --proxy-server，避免浏览器原生认证弹窗"
                             )
                         else:
-                            proxy_server_arg = f"--proxy-server={protocol}://{host}:{port}"
+                            proxy_server_arg = (
+                                f"--proxy-server={protocol}://{host}:{port}"
+                            )
                         self._proxy_url = f"{protocol}://{host}:{port}"
-                        debug_logger.log_info(f"[BrowserCaptcha] Personal 浏览器代理: {self._proxy_url}")
+                        debug_logger.log_info(
+                            f"[BrowserCaptcha] Personal 浏览器代理: {self._proxy_url}"
+                        )
 
                     browser_args = _build_personal_browser_args(
                         headless=self.headless,
@@ -9296,14 +10129,18 @@ class BrowserCaptchaService:
                         proxy_extension_dir=self._proxy_ext_dir,
                     )
                     if self._requires_virtual_display():
-                        browser_args = _tune_personal_browser_args_for_docker_headed(browser_args)
+                        browser_args = _tune_personal_browser_args_for_docker_headed(
+                            browser_args
+                        )
                         debug_logger.log_info(
                             "[BrowserCaptcha] Docker headed 指纹优化已启用，已收敛明显的容器化启动参数"
                         )
-                    if self._requires_virtual_display() and '--no-startup-window' in browser_args:
+                    if (
+                        self._requires_virtual_display()
+                        and "--no-startup-window" in browser_args
+                    ):
                         browser_args = [
-                            arg for arg in browser_args
-                            if arg != '--no-startup-window'
+                            arg for arg in browser_args if arg != "--no-startup-window"
                         ]
                         debug_logger.log_info(
                             "[BrowserCaptcha] Docker 有头虚拟显示模式已禁用 --no-startup-window，保留宿主窗口"
@@ -9351,7 +10188,9 @@ class BrowserCaptchaService:
                     self.browser = None
 
                     while launch_plan:
-                        launch_label, current_launch_kwargs, retry_reason = launch_plan.pop(0)
+                        launch_label, current_launch_kwargs, retry_reason = (
+                            launch_plan.pop(0)
+                        )
                         current_config = uc.Config(**current_launch_kwargs)
                         effective_launch_args = current_config()
                         if retry_reason:
@@ -9365,16 +10204,27 @@ class BrowserCaptchaService:
                                 timeout_seconds=30.0,
                                 label=launch_label,
                             )
-                            self._browser_process_pid = self._get_browser_process_pid(self.browser)
+                            self._browser_process_pid = self._get_browser_process_pid(
+                                self.browser
+                            )
                             # uc.start() 成功后 CDP 连接已就绪（start() 内部已执行 update_targets 和 websocket 握手）
                             # 短暂等待确保事件循环有机会处理已注册的回调
                             await asyncio.sleep(0.1)
                             break
                         except Exception as start_error:
                             last_start_error = start_error
-                            failed_profile_dir = str(current_launch_kwargs.get("user_data_dir") or "").strip()
-                            if failed_profile_dir and self._is_runtime_managed_profile_dir(failed_profile_dir):
-                                self._managed_runtime_profile_dirs.add(os.path.normpath(failed_profile_dir))
+                            failed_profile_dir = str(
+                                current_launch_kwargs.get("user_data_dir") or ""
+                            ).strip()
+                            if (
+                                failed_profile_dir
+                                and self._is_runtime_managed_profile_dir(
+                                    failed_profile_dir
+                                )
+                            ):
+                                self._managed_runtime_profile_dirs.add(
+                                    os.path.normpath(failed_profile_dir)
+                                )
                                 self._terminate_browser_processes_for_profile_dirs(
                                     [failed_profile_dir],
                                     reason=f"{launch_label}:failed_start",
@@ -9382,12 +10232,16 @@ class BrowserCaptchaService:
 
                             if (
                                 not tried_no_sandbox_retry
-                                and self._should_use_explicit_no_sandbox_retry(start_error)
+                                and self._should_use_explicit_no_sandbox_retry(
+                                    start_error
+                                )
                             ):
                                 tried_no_sandbox_retry = True
-                                fallback_browser_args = list(current_launch_kwargs.get("browser_args") or [])
-                                if '--no-sandbox' not in fallback_browser_args:
-                                    fallback_browser_args.append('--no-sandbox')
+                                fallback_browser_args = list(
+                                    current_launch_kwargs.get("browser_args") or []
+                                )
+                                if "--no-sandbox" not in fallback_browser_args:
+                                    fallback_browser_args.append("--no-sandbox")
                                 fallback_kwargs = dict(current_launch_kwargs)
                                 fallback_kwargs["browser_args"] = fallback_browser_args
                                 fallback_kwargs["sandbox"] = True
@@ -9405,10 +10259,20 @@ class BrowserCaptchaService:
                                 and self._is_retryable_browser_launch_error(start_error)
                             ):
                                 tried_fresh_profile_retry = True
-                                previous_profile_dir = str(current_launch_kwargs.get("user_data_dir") or self.user_data_dir or "").strip()
-                                fresh_profile_dir = self._create_fresh_runtime_profile_dir(prefix="launch_retry_profile_")
+                                previous_profile_dir = str(
+                                    current_launch_kwargs.get("user_data_dir")
+                                    or self.user_data_dir
+                                    or ""
+                                ).strip()
+                                fresh_profile_dir = (
+                                    self._create_fresh_runtime_profile_dir(
+                                        prefix="launch_retry_profile_"
+                                    )
+                                )
                                 fresh_profile_kwargs = dict(current_launch_kwargs)
-                                fresh_profile_kwargs["user_data_dir"] = fresh_profile_dir
+                                fresh_profile_kwargs["user_data_dir"] = (
+                                    fresh_profile_dir
+                                )
                                 launch_plan.insert(
                                     0,
                                     (
@@ -9428,7 +10292,10 @@ class BrowserCaptchaService:
                         raise last_start_error
 
                     _patch_nodriver_runtime(self.browser)
-                    live_user_agent, live_product = await self._get_live_browser_runtime_identity()
+                    (
+                        live_user_agent,
+                        live_product,
+                    ) = await self._get_live_browser_runtime_identity()
                     self._refresh_runtime_fingerprint_spoof_seed(
                         user_agent=live_user_agent,
                         product=live_product,
@@ -9453,7 +10320,9 @@ class BrowserCaptchaService:
                                 duration_seconds=1.0,
                             )
                     if self._proxy_ext_dir:
-                        debug_logger.log_info("[BrowserCaptcha] 等待代理认证扩展完成初始化...")
+                        debug_logger.log_info(
+                            "[BrowserCaptcha] 等待代理认证扩展完成初始化..."
+                        )
                         await asyncio.sleep(1.5)
                     if not self.headless:
                         if self._requires_virtual_display():
@@ -9468,7 +10337,9 @@ class BrowserCaptchaService:
                     self._mark_runtime_active()
                     self._reset_browser_launch_failure_state()
                     if self._idle_reaper_task is None or self._idle_reaper_task.done():
-                        self._idle_reaper_task = asyncio.create_task(self._idle_tab_reaper_loop())
+                        self._idle_reaper_task = asyncio.create_task(
+                            self._idle_tab_reaper_loop()
+                        )
                     profile_label = self.user_data_dir or "<isolated-temp>"
                     debug_logger.log_info(
                         f"[BrowserCaptcha] ✅ nodriver 浏览器已启动 (Profile: {profile_label})"
@@ -9499,7 +10370,9 @@ class BrowserCaptchaService:
     async def start_resident_mode(self, project_id: str):
         """启动常驻模式（初始化浏览器，get_token 会自动创建标签页）"""
         if not str(project_id or "").strip():
-            debug_logger.log_warning("[BrowserCaptcha] 启动常驻模式失败：project_id 为空")
+            debug_logger.log_warning(
+                "[BrowserCaptcha] 启动常驻模式失败：project_id 为空"
+            )
             return
         self._mark_runtime_active()
         await self.initialize()
@@ -9514,12 +10387,18 @@ class BrowserCaptchaService:
         target_slot_id = None
         if project_id:
             async with self._resident_lock:
-                target_slot_id = project_id if project_id in self._resident_tabs else self._resolve_affinity_slot_locked(project_id)
+                target_slot_id = (
+                    project_id
+                    if project_id in self._resident_tabs
+                    else self._resolve_affinity_slot_locked(project_id)
+                )
 
         if target_slot_id:
             await self._close_resident_tab(target_slot_id)
             self._resident_error_streaks.pop(target_slot_id, None)
-            debug_logger.log_info(f"[BrowserCaptcha] 已关闭共享标签页 slot={target_slot_id} (request={project_id})")
+            debug_logger.log_info(
+                f"[BrowserCaptcha] 已关闭共享标签页 slot={target_slot_id} (request={project_id})"
+            )
             return
 
         async with self._resident_lock:
@@ -9536,11 +10415,17 @@ class BrowserCaptchaService:
 
         for resident_info in resident_items:
             if resident_info and resident_info.tab:
-                await self._dispose_browser_context_quietly(resident_info.browser_context_id)
+                await self._dispose_browser_context_quietly(
+                    resident_info.browser_context_id
+                )
                 await self._close_tab_quietly(resident_info.tab)
-        debug_logger.log_info(f"[BrowserCaptcha] 已关闭所有共享常驻标签页 (共 {len(slot_ids)} 个)")
+        debug_logger.log_info(
+            f"[BrowserCaptcha] 已关闭所有共享常驻标签页 (共 {len(slot_ids)} 个)"
+        )
 
-    async def _wait_for_document_ready(self, tab, retries: int = 30, interval_seconds: float = 1.0) -> bool:
+    async def _wait_for_document_ready(
+        self, tab, retries: int = 30, interval_seconds: float = 1.0
+    ) -> bool:
         """等待页面文档加载完成。"""
         for _ in range(retries):
             try:
@@ -9563,20 +10448,25 @@ class BrowserCaptchaService:
         error_lower = (error_text or "").lower()
         if self._is_generation_policy_error(error_text):
             return False
-        return any(keyword in error_lower for keyword in [
+        return any(
+            keyword in error_lower
+            for keyword in [
             "http error 500",
             "public_error",
             "internal error",
             "reason=internal",
             "reason: internal",
-            "\"reason\":\"internal\"",
+                '"reason":"internal"',
             "server error",
             "upstream error",
-        ])
+            ]
+        )
 
     def _is_external_flow_error(self, error_text: str) -> bool:
         error_lower = (error_text or "").lower()
-        return any(keyword in error_lower for keyword in [
+        return any(
+            keyword in error_lower
+            for keyword in [
             "429",
             "too many requests",
             "tls",
@@ -9596,20 +10486,26 @@ class BrowserCaptchaService:
             "login cookie",
             "access token",
             "authorization",
-        ])
+            ]
+        )
 
     def _is_generation_policy_error(self, error_text: str) -> bool:
         error_lower = (error_text or "").lower()
-        return any(keyword in error_lower for keyword in [
+        return any(
+            keyword in error_lower
+            for keyword in [
             "public_error_unsafe_generation",
             "unsafe_generation",
             "request contains an invalid ar",
-        ])
+            ]
+        )
 
     def _is_recaptcha_cache_reset_error(self, error_text: str) -> bool:
         """Whether the upstream error should trigger browser cache/storage reset."""
         error_lower = (error_text or "").lower()
-        return any(keyword in error_lower for keyword in [
+        return any(
+            keyword in error_lower
+            for keyword in [
             "403",
             "forbidden",
             "recaptcha evaluation failed",
@@ -9617,7 +10513,8 @@ class BrowserCaptchaService:
             "unusual_activity",
             "unusual activity",
             "recaptcha",
-        ])
+            ]
+        )
 
     def _is_force_fresh_browser_restart_error(self, error_text: str) -> bool:
         """命中特定 Flow 风控错误时，直接重启为全新无状态浏览器。"""
@@ -9625,15 +10522,20 @@ class BrowserCaptchaService:
         if "recaptcha evaluation failed" not in error_lower:
             return False
 
-        return any(keyword in error_lower for keyword in [
+        return any(
+            keyword in error_lower
+            for keyword in [
             "public_error_unusual_activity_too_much_traffic",
             "public_error_unusual_activity",
             "public_error_something_went_wrong",
-        ])
+            ]
+        )
 
     async def _clear_tab_site_storage(self, tab) -> Dict[str, Any]:
         """清理当前站点的本地存储状态，但保留 cookies 登录态。"""
-        result = await self._tab_evaluate(tab, """
+        result = await self._tab_evaluate(
+            tab,
+            """
             (async () => {
                 const summary = {
                     local_storage_cleared: false,
@@ -9716,7 +10618,10 @@ class BrowserCaptchaService:
 
                 return summary;
             })()
-        """, label="clear_tab_site_storage", timeout_seconds=15.0)
+        """,
+            label="clear_tab_site_storage",
+            timeout_seconds=15.0,
+        )
         return result if isinstance(result, dict) else {}
 
     async def _clear_resident_storage_and_reload(
@@ -9734,7 +10639,11 @@ class BrowserCaptchaService:
             if resolved_slot_id:
                 resident_info = self._resident_tabs.get(resolved_slot_id)
             else:
-                resolved_slot_id, resident_info = self._resolve_resident_slot_for_project_locked(project_id, token_id=token_id)
+                resolved_slot_id, resident_info = (
+                    self._resolve_resident_slot_for_project_locked(
+                        project_id, token_id=token_id
+                    )
+                )
 
         if not resident_info or not resident_info.tab:
             debug_logger.log_warning(
@@ -9759,19 +10668,27 @@ class BrowserCaptchaService:
                     label=f"clear_resident_reload:{resolved_slot_id or project_id}",
                 )
 
-                if not await self._wait_for_document_ready(resident_info.tab, retries=30, interval_seconds=1.0):
+                if not await self._wait_for_document_ready(
+                    resident_info.tab, retries=30, interval_seconds=1.0
+                ):
                     debug_logger.log_warning(
                         f"[BrowserCaptcha] project_id={project_id}, slot={resolved_slot_id} 清理后页面加载超时"
                     )
                     return False
 
-                resident_info.recaptcha_ready = await self._wait_for_recaptcha(resident_info.tab)
+                resident_info.recaptcha_ready = await self._wait_for_recaptcha(
+                    resident_info.tab
+                )
                 if resident_info.recaptcha_ready:
                     resident_info.last_used_at = time.time()
                     async with self._resident_lock:
                         self._clear_resident_slot_unavailable_locked(resolved_slot_id)
-                    self._remember_project_affinity(project_id, resolved_slot_id, resident_info)
-                    self._remember_token_affinity(token_id, resolved_slot_id, resident_info)
+                    self._remember_project_affinity(
+                        project_id, resolved_slot_id, resident_info
+                    )
+                    self._remember_token_affinity(
+                        token_id, resolved_slot_id, resident_info
+                    )
                     self._resident_error_streaks.pop(resolved_slot_id, None)
                     debug_logger.log_warning(
                         f"[BrowserCaptcha] project_id={project_id}, slot={resolved_slot_id} 清理后已恢复 reCAPTCHA"
@@ -9842,8 +10759,12 @@ class BrowserCaptchaService:
                             return_slot_key=True,
                         )
                         if resident_info is not None and slot_id:
-                            self._remember_project_affinity(project_id, slot_id, resident_info)
-                            self._remember_token_affinity(token_id, slot_id, resident_info)
+                            self._remember_project_affinity(
+                                project_id, slot_id, resident_info
+                            )
+                            self._remember_token_affinity(
+                                token_id, slot_id, resident_info
+                            )
                             self._resident_error_streaks.pop(slot_id, None)
                             debug_logger.log_warning(
                                 f"[BrowserCaptcha] project_id={project_id} 检测到最近已完成浏览器恢复，复用当前运行态 (slot={slot_id})"
@@ -9882,7 +10803,9 @@ class BrowserCaptchaService:
                 f"[BrowserCaptcha] project_id={project_id} 准备重启 nodriver 浏览器以恢复"
             )
 
-        await self._shutdown_browser_runtime(cancel_idle_reaper=False, reason=restart_reason)
+        await self._shutdown_browser_runtime(
+            cancel_idle_reaper=False, reason=restart_reason
+        )
         if fresh_profile:
             self._reset_local_recaptcha_asset_caches(purge_disk=True)
         await self.initialize()
@@ -9894,7 +10817,9 @@ class BrowserCaptchaService:
             return_slot_key=True,
         )
         if resident_info is None or not slot_id:
-            debug_logger.log_warning(f"[BrowserCaptcha] project_id={project_id} 浏览器重启后无法定位可用共享标签页")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] project_id={project_id} 浏览器重启后无法定位可用共享标签页"
+            )
             return False
 
         self._remember_project_affinity(project_id, slot_id, resident_info)
@@ -9934,7 +10859,11 @@ class BrowserCaptchaService:
                     )
                     return
             else:
-                resolved_slot_id, resident_info = self._resolve_resident_slot_for_project_locked(project_id, token_id=token_id)
+                resolved_slot_id, resident_info = (
+                    self._resolve_resident_slot_for_project_locked(
+                        project_id, token_id=token_id
+                    )
+                )
 
         if not resolved_slot_id:
             return
@@ -9988,7 +10917,12 @@ class BrowserCaptchaService:
             if self._is_recaptcha_cache_reset_error(error_text):
                 restart_threshold = max(
                     2,
-                    int(getattr(config, "browser_personal_recaptcha_restart_threshold", 2) or 2),
+                    int(
+                        getattr(
+                            config, "browser_personal_recaptcha_restart_threshold", 2
+                        )
+                        or 2
+                    ),
                 )
                 debug_logger.log_warning(
                     f"[BrowserCaptcha] project_id={project_id} 检测到 403/reCAPTCHA/unusual_activity 错误，清理缓存并重建"
@@ -10017,16 +10951,26 @@ class BrowserCaptchaService:
                     debug_logger.log_warning(
                         f"[BrowserCaptcha] project_id={project_id}, slot={resolved_slot_id} reCAPTCHA 风控连续失败，升级为整浏览器重启恢复"
                     )
-                    await self._restart_browser_for_project(project_id, token_id=token_id)
+                    await self._restart_browser_for_project(
+                        project_id, token_id=token_id
+                    )
                 return
 
             # 服务端错误：根据连续失败次数决定恢复策略
             if self._is_server_side_flow_error(error_text):
-                recreate_threshold = max(2, int(getattr(config, "browser_personal_recreate_threshold", 2) or 2))
-                restart_threshold = max(3, int(getattr(config, "browser_personal_restart_threshold", 3) or 3))
+                recreate_threshold = max(
+                    2,
+                    int(getattr(config, "browser_personal_recreate_threshold", 2) or 2),
+                )
+                restart_threshold = max(
+                    3,
+                    int(getattr(config, "browser_personal_restart_threshold", 3) or 3),
+                )
 
                 if streak >= restart_threshold:
-                    await self._restart_browser_for_project(project_id, token_id=token_id)
+                    await self._restart_browser_for_project(
+                        project_id, token_id=token_id
+                    )
                     return
                 if streak >= recreate_threshold:
                     await self._recreate_resident_tab(
@@ -10141,7 +11085,11 @@ class BrowserCaptchaService:
                         last_bootstrap_state = None
 
                     if isinstance(last_bootstrap_state, dict):
-                        status = str(last_bootstrap_state.get("status") or "").strip().lower()
+                        status = (
+                            str(last_bootstrap_state.get("status") or "")
+                            .strip()
+                            .lower()
+                        )
                         debug_logger.log_info(
                             "[BrowserCaptcha] reCAPTCHA bootstrap 状态: "
                             f"status={status or '<empty>'}, "
@@ -10191,10 +11139,14 @@ class BrowserCaptchaService:
         debug_logger.log_info("[BrowserCaptcha] 检测自定义 reCAPTCHA...")
 
         ready_check = (
+            (
             "typeof grecaptcha !== 'undefined' && typeof grecaptcha.enterprise !== 'undefined' && "
             "typeof grecaptcha.enterprise.execute === 'function'"
-        ) if enterprise else (
+            )
+            if enterprise
+            else (
             "typeof grecaptcha !== 'undefined' && typeof grecaptcha.execute === 'function'"
+        )
         )
         script_path = "recaptcha/enterprise.js" if enterprise else "recaptcha/api.js"
         label = "Enterprise" if enterprise else "V3"
@@ -10226,14 +11178,18 @@ class BrowserCaptchaService:
                 timeout_seconds=2.5,
             )
             if is_ready:
-                debug_logger.log_info(f"[BrowserCaptcha] 自定义 reCAPTCHA {label} 已加载（等待了 {i * 0.5} 秒）")
+                debug_logger.log_info(
+                    f"[BrowserCaptcha] 自定义 reCAPTCHA {label} 已加载（等待了 {i * 0.5} 秒）"
+                )
                 return True
             await tab.sleep(0.5)
 
         debug_logger.log_warning("[BrowserCaptcha] 自定义 reCAPTCHA 加载超时")
         return False
 
-    async def _execute_recaptcha_on_tab(self, tab, action: str = "IMAGE_GENERATION") -> Optional[str]:
+    async def _execute_recaptcha_on_tab(
+        self, tab, action: str = "IMAGE_GENERATION"
+    ) -> Optional[str]:
         """在指定标签页执行 reCAPTCHA 获取 token
 
         Args:
@@ -10295,16 +11251,26 @@ class BrowserCaptchaService:
             return_by_value=True,
         )
 
-        token = execute_result.get("token") if isinstance(execute_result, dict) else None
+        token = (
+            execute_result.get("token") if isinstance(execute_result, dict) else None
+        )
         if not token:
-            error = execute_result.get("error") if isinstance(execute_result, dict) else execute_result
+            error = (
+                execute_result.get("error")
+                if isinstance(execute_result, dict)
+                else execute_result
+            )
             if error:
                 debug_logger.log_error(f"[BrowserCaptcha] reCAPTCHA 错误: {error}")
 
         if token:
-            debug_logger.log_info(f"[BrowserCaptcha] ✅ Token 获取成功 (长度: {len(token)})")
+            debug_logger.log_info(
+                f"[BrowserCaptcha] ✅ Token 获取成功 (长度: {len(token)})"
+            )
         else:
-            debug_logger.log_warning("[BrowserCaptcha] Token 获取失败，交由上层执行标签页恢复")
+            debug_logger.log_warning(
+                "[BrowserCaptcha] Token 获取失败，交由上层执行标签页恢复"
+            )
 
         return token
 
@@ -10319,7 +11285,9 @@ class BrowserCaptchaService:
         ts = int(time.time() * 1000)
         token_var = f"_custom_recaptcha_token_{ts}"
         error_var = f"_custom_recaptcha_error_{ts}"
-        execute_target = "grecaptcha.enterprise.execute" if enterprise else "grecaptcha.execute"
+        execute_target = (
+            "grecaptcha.enterprise.execute" if enterprise else "grecaptcha.execute"
+        )
 
         execute_script = f"""
             (() => {{
@@ -10367,7 +11335,9 @@ class BrowserCaptchaService:
                 timeout_seconds=2.0,
             )
             if error:
-                debug_logger.log_error(f"[BrowserCaptcha] 自定义 reCAPTCHA 错误: {error}")
+                debug_logger.log_error(
+                    f"[BrowserCaptcha] 自定义 reCAPTCHA 错误: {error}"
+                )
                 break
 
         try:
@@ -10383,7 +11353,9 @@ class BrowserCaptchaService:
         if token:
             post_wait_seconds = 3
             try:
-                post_wait_seconds = float(getattr(config, "browser_recaptcha_settle_seconds", 3) or 3)
+                post_wait_seconds = float(
+                    getattr(config, "browser_recaptcha_settle_seconds", 3) or 3
+                )
             except Exception:
                 pass
             if post_wait_seconds > 0:
@@ -10394,7 +11366,9 @@ class BrowserCaptchaService:
 
         return token
 
-    async def _verify_score_on_tab(self, tab, token: str, verify_url: str) -> Dict[str, Any]:
+    async def _verify_score_on_tab(
+        self, tab, token: str, verify_url: str
+    ) -> Dict[str, Any]:
         """直接读取测试页面展示的分数，避免 verify.php 与页面显示口径不一致。"""
         _ = token
         _ = verify_url
@@ -10404,13 +11378,17 @@ class BrowserCaptchaService:
         last_snapshot: Dict[str, Any] = {}
 
         try:
-            timeout_seconds = float(getattr(config, "browser_score_dom_wait_seconds", 25) or 25)
+            timeout_seconds = float(
+                getattr(config, "browser_score_dom_wait_seconds", 25) or 25
+            )
         except Exception:
             pass
 
         while (time.time() - started_at) < timeout_seconds:
             try:
-                result = await self._tab_evaluate(tab, """
+                result = await self._tab_evaluate(
+                    tab,
+                    """
                     (() => {
                         const bodyText = ((document.body && document.body.innerText) || "")
                             .replace(/\\u00a0/g, " ")
@@ -10444,7 +11422,10 @@ class BrowserCaptchaService:
                             url: location.href || "",
                         };
                     })()
-                """, label="verify_score_dom", timeout_seconds=10.0)
+                """,
+                    label="verify_score_dom",
+                    timeout_seconds=10.0,
+                )
             except Exception as e:
                 result = {"error": f"{type(e).__name__}: {str(e)[:200]}"}
 
@@ -10462,8 +11443,10 @@ class BrowserCaptchaService:
                             "score": score,
                             "source": result.get("source") or "antcpt_dom",
                             "raw_text": result.get("raw_text") or "",
-                            "current_user_agent": result.get("current_user_agent") or "",
-                            "current_ip_address": result.get("current_ip_address") or "",
+                            "current_user_agent": result.get("current_user_agent")
+                            or "",
+                            "current_ip_address": result.get("current_ip_address")
+                            or "",
                             "page_title": result.get("title") or "",
                             "page_url": result.get("url") or "",
                         },
@@ -10472,7 +11455,9 @@ class BrowserCaptchaService:
             if not refresh_clicked and (time.time() - started_at) >= 2:
                 refresh_clicked = True
                 try:
-                    await self._tab_evaluate(tab, """
+                    await self._tab_evaluate(
+                        tab,
+                        """
                         (() => {
                             const nodes = Array.from(
                                 document.querySelectorAll('button, input[type="button"], input[type="submit"], a')
@@ -10487,7 +11472,10 @@ class BrowserCaptchaService:
                             }
                             return false;
                         })()
-                    """, label="verify_score_click_refresh", timeout_seconds=5.0)
+                    """,
+                        label="verify_score_click_refresh",
+                        timeout_seconds=5.0,
+                    )
                 except Exception:
                     pass
 
@@ -10517,7 +11505,9 @@ class BrowserCaptchaService:
     async def _extract_tab_fingerprint(self, tab) -> Optional[Dict[str, Any]]:
         """从 nodriver 标签页提取浏览器指纹信息。"""
         try:
-            fingerprint = await self._tab_evaluate(tab, """
+            fingerprint = await self._tab_evaluate(
+                tab,
+                """
                 () => {
                     const ua = navigator.userAgent || "";
                     const lang = navigator.language || "";
@@ -10569,7 +11559,11 @@ class BrowserCaptchaService:
                         screen_avail_height: Number(screen.availHeight || 0),
                     };
                 }
-            """, label="extract_tab_fingerprint", timeout_seconds=8.0, return_by_value=True)
+            """,
+                label="extract_tab_fingerprint",
+                timeout_seconds=8.0,
+                return_by_value=True,
+            )
             if not isinstance(fingerprint, dict):
                 fingerprint = {}
 
@@ -10590,7 +11584,9 @@ class BrowserCaptchaService:
                     result[key] = value
             languages = fingerprint.get("languages")
             if isinstance(languages, list):
-                normalized_languages = [str(item).strip() for item in languages if str(item).strip()]
+                normalized_languages = [
+                    str(item).strip() for item in languages if str(item).strip()
+                ]
                 if normalized_languages:
                     result["languages"] = normalized_languages
             for key in (
@@ -10604,7 +11600,9 @@ class BrowserCaptchaService:
             ):
                 value = fingerprint.get(key)
                 if isinstance(value, (int, float)) and float(value) > 0:
-                    result[key] = int(value) if float(value).is_integer() else float(value)
+                    result[key] = (
+                        int(value) if float(value).is_integer() else float(value)
+                    )
             if not str(result.get("user_agent") or "").strip():
                 fallback_ua = await self._tab_evaluate(
                     tab,
@@ -10675,9 +11673,17 @@ class BrowserCaptchaService:
         issued_at: Optional[float] = None,
         expires_at: Optional[float] = None,
     ) -> Dict[str, Any]:
-        normalized_fingerprint = dict(fingerprint) if isinstance(fingerprint, dict) and fingerprint else None
-        proxy_url = str(((normalized_fingerprint or {}).get("proxy_url") or self._proxy_url or "")).strip()
-        if normalized_fingerprint is not None and proxy_url and not str(normalized_fingerprint.get("proxy_url") or "").strip():
+        normalized_fingerprint = (
+            dict(fingerprint) if isinstance(fingerprint, dict) and fingerprint else None
+        )
+        proxy_url = str(
+            ((normalized_fingerprint or {}).get("proxy_url") or self._proxy_url or "")
+        ).strip()
+        if (
+            normalized_fingerprint is not None
+            and proxy_url
+            and not str(normalized_fingerprint.get("proxy_url") or "").strip()
+        ):
             normalized_fingerprint["proxy_url"] = proxy_url
 
         bundled_session_cookies: Optional[Dict[str, str]] = None
@@ -10690,7 +11696,10 @@ class BrowserCaptchaService:
         issued_timestamp = float(issued_at or time.time())
         expires_timestamp = float(
             expires_at
-            or (issued_timestamp + float(getattr(config, "token_pool_ttl_seconds", 120) or 120))
+            or (
+                issued_timestamp
+                + float(getattr(config, "token_pool_ttl_seconds", 120) or 120)
+            )
         )
         return {
             "token": token,
@@ -10741,7 +11750,7 @@ class BrowserCaptchaService:
                         "https://www.google.com",
                         "https://www.recaptcha.net",
                         "https://accounts.google.com",
-                        "https://labs.google",
+                        "https://flow.google.com",
                     ]
                 },
             ),
@@ -10753,8 +11762,16 @@ class BrowserCaptchaService:
                     for cookie in raw:
                         cname = str(getattr(cookie, "name", "") or "").strip()
                         cvalue = str(getattr(cookie, "value", "") or "").strip()
-                        cdomain = str(getattr(cookie, "domain", "") or "").strip().lower()
-                        if not cname or not cvalue or not cdomain.lstrip(".").endswith(("google.com", "recaptcha.net", "labs.google")):
+                        cdomain = (
+                            str(getattr(cookie, "domain", "") or "").strip().lower()
+                        )
+                        if (
+                            not cname
+                            or not cvalue
+                            or not cdomain.lstrip(".").endswith(
+                                ("google.com", "recaptcha.net")
+                            )
+                        ):
                             continue
                         if any(k in cname for k in _cookie_keywords):
                             collected[cname] = cvalue
@@ -10766,21 +11783,30 @@ class BrowserCaptchaService:
             except Exception:
                 continue
 
-        if isinstance(resident_info.session_cookies, dict) and resident_info.session_cookies:
+        if (
+            isinstance(resident_info.session_cookies, dict)
+            and resident_info.session_cookies
+        ):
             return dict(resident_info.session_cookies)
 
         done_event = asyncio.get_running_loop().create_future()
 
         async def _on_extra(event):
             try:
-                for ac in (getattr(event, "associated_cookies", None) or []):
+                for ac in getattr(event, "associated_cookies", None) or []:
                     cookie = getattr(ac, "cookie", None)
                     if not cookie:
                         continue
                     cname = str(getattr(cookie, "name", "") or "").strip()
                     cvalue = str(getattr(cookie, "value", "") or "").strip()
                     cdomain = str(getattr(cookie, "domain", "") or "").strip().lower()
-                    if not cname or not cvalue or not cdomain.lstrip(".").endswith(("google.com", "recaptcha.net", "labs.google")):
+                    if (
+                        not cname
+                        or not cvalue
+                        or not cdomain.lstrip(".").endswith(
+                            ("google.com", "recaptcha.net")
+                        )
+                    ):
                         continue
                     if any(k in cname for k in _cookie_keywords):
                         collected[cname] = cvalue
@@ -10791,9 +11817,12 @@ class BrowserCaptchaService:
 
         current_url = None
         try:
-            r = await tab.send(cdp.runtime.evaluate(
-                expression="document.location.href", await_promise=False,
-            ))
+            r = await tab.send(
+                cdp.runtime.evaluate(
+                    expression="document.location.href",
+                    await_promise=False,
+                )
+            )
             v = getattr(r, "result", None)
             if v and hasattr(v, "value"):
                 current_url = str(v.value or "")
@@ -10841,15 +11870,23 @@ class BrowserCaptchaService:
         success_label: str,
     ) -> Optional[str]:
         """在共享常驻标签页上执行一次打码，并统一更新成功态。"""
-        if not resident_info or not resident_info.tab or not resident_info.recaptcha_ready:
+        if (
+            not resident_info
+            or not resident_info.tab
+            or not resident_info.recaptcha_ready
+        ):
             if consume_reservation:
-                await self._release_resident_slot_reservation(slot_id, resident_info=resident_info)
+                await self._release_resident_slot_reservation(
+                    slot_id, resident_info=resident_info
+                )
             return None
 
         start_time = time.time()
         async with resident_info.solve_lock:
             if consume_reservation:
-                await self._consume_resident_slot_reservation(slot_id, resident_info=resident_info)
+                await self._consume_resident_slot_reservation(
+                    slot_id, resident_info=resident_info
+                )
             token = await self._run_with_timeout(
                 self._execute_recaptcha_on_tab(resident_info.tab, action),
                 timeout_seconds=self._solve_timeout_seconds,
@@ -10869,7 +11906,9 @@ class BrowserCaptchaService:
         self._remember_project_affinity(project_id, slot_id, resident_info)
         self._resident_error_streaks.pop(slot_id, None)
         self._mark_browser_health(True)
-        resident_info.fingerprint = await self._refresh_last_fingerprint(resident_info.tab)
+        resident_info.fingerprint = await self._refresh_last_fingerprint(
+            resident_info.tab
+        )
         self._remember_fingerprint(resident_info.fingerprint)
         # 同步提取 session cookie 供 reload 链路复用
         try:
@@ -10915,12 +11954,15 @@ class BrowserCaptchaService:
         Returns:
             reCAPTCHA token字符串，如果获取失败返回None
         """
+
         def finish_result(
             token: Optional[str],
             resolved_slot_id: Optional[str] = None,
         ) -> Optional[str] | tuple[Optional[str], Optional[str]]:
             if return_slot_id:
-                return token, (str(resolved_slot_id or "").strip() or None if token else None)
+                return token, (
+                    str(resolved_slot_id or "").strip() or None if token else None
+                )
             return token
 
         debug_logger.log_info(
@@ -10971,7 +12013,9 @@ class BrowserCaptchaService:
                     f"[BrowserCaptcha] 共享标签页分配时浏览器运行态断开，立即重启恢复 (project: {project_id}, token_id={token_id}): {e}"
                 )
                 slot_id, resident_info = None, None
-                if await self._recover_browser_runtime(project_id, reason="ensure_resident_tab_runtime_error"):
+                if await self._recover_browser_runtime(
+                    project_id, reason="ensure_resident_tab_runtime_error"
+                ):
                     try:
                         slot_id, resident_info = await self._ensure_resident_tab(
                             project_id,
@@ -10989,7 +12033,9 @@ class BrowserCaptchaService:
                         slot_id, resident_info = None, None
             reserved_slot_id = slot_id or None
             if resident_info is None or not slot_id:
-                if await self._wait_for_active_resident_rebuild(timeout_seconds=min(20.0, self._solve_timeout_seconds)):
+                if await self._wait_for_active_resident_rebuild(
+                    timeout_seconds=min(20.0, self._solve_timeout_seconds)
+                ):
                     slot_id, resident_info = await self._ensure_resident_tab(
                         project_id,
                         token_id=token_id,
@@ -11002,7 +12048,9 @@ class BrowserCaptchaService:
                     debug_logger.log_warning(
                         f"[BrowserCaptcha] 共享标签页池为空且浏览器疑似失活，尝试重启恢复 (project: {project_id}, token_id={token_id})"
                     )
-                    if await self._recover_browser_runtime(project_id, reason="ensure_resident_tab"):
+                    if await self._recover_browser_runtime(
+                        project_id, reason="ensure_resident_tab"
+                    ):
                         slot_id, resident_info = await self._ensure_resident_tab(
                             project_id,
                             token_id=token_id,
@@ -11015,7 +12063,9 @@ class BrowserCaptchaService:
                 debug_logger.log_warning(
                     f"[BrowserCaptcha] 共享标签页池不可用，fallback 到传统模式 (project: {project_id}, token_id={token_id})"
                 )
-                legacy_token = await self._get_token_legacy(project_id, action, token_id=token_id)
+                legacy_token = await self._get_token_legacy(
+                    project_id, action, token_id=token_id
+                )
                 return finish_result(legacy_token, None)
 
             debug_logger.log_info(
@@ -11041,7 +12091,11 @@ class BrowserCaptchaService:
                         f"[BrowserCaptcha] 共享标签页 cookie 绑定校验失败，准备重建 (slot={slot_id}, project={project_id}, token_id={token_id})"
                     )
 
-            if resident_info and resident_info.tab and not resident_info.recaptcha_ready:
+            if (
+                resident_info
+                and resident_info.tab
+                and not resident_info.recaptcha_ready
+            ):
                 debug_logger.log_warning(
                     f"[BrowserCaptcha] 共享标签页未就绪，准备重建 cold slot={slot_id}, project={project_id}, token_id={token_id}"
                 )
@@ -11063,7 +12117,9 @@ class BrowserCaptchaService:
                     debug_logger.log_warning(
                         f"[BrowserCaptcha] cold slot 重建失败，升级为浏览器级恢复 (slot={slot_id}, project={project_id}, token_id={token_id})"
                     )
-                    if await self._recover_browser_runtime(project_id, reason=f"cold_resident_tab:{slot_id or 'unknown'}"):
+                    if await self._recover_browser_runtime(
+                        project_id, reason=f"cold_resident_tab:{slot_id or 'unknown'}"
+                    ):
                         slot_id, resident_info = await self._ensure_resident_tab(
                             project_id,
                             token_id=token_id,
@@ -11099,7 +12155,9 @@ class BrowserCaptchaService:
                     )
                 except Exception as e:
                     reserved_slot_id = None
-                    debug_logger.log_warning(f"[BrowserCaptcha] 共享标签页异常 (slot={slot_id}): {e}，尝试重建...")
+                    debug_logger.log_warning(
+                        f"[BrowserCaptcha] 共享标签页异常 (slot={slot_id}): {e}，尝试重建..."
+                    )
                     await self._mark_resident_slot_unavailable(
                         slot_id,
                         resident_info,
@@ -11151,7 +12209,10 @@ class BrowserCaptchaService:
                         debug_logger.log_warning(
                             f"[BrowserCaptcha] 共享标签页重建返回空，升级为浏览器级恢复 (slot={slot_id}, project={project_id}, token_id={token_id})"
                         )
-                        if await self._recover_browser_runtime(project_id, reason=f"resident_rebuild_empty:{slot_id or 'unknown'}"):
+                        if await self._recover_browser_runtime(
+                            project_id,
+                            reason=f"resident_rebuild_empty:{slot_id or 'unknown'}",
+                        ):
                             slot_id, resident_info = await self._ensure_resident_tab(
                                 project_id,
                                 token_id=token_id,
@@ -11173,7 +12234,9 @@ class BrowserCaptchaService:
                             )
                             reserved_slot_id = None
                             if token:
-                                debug_logger.log_info(f"[BrowserCaptcha] ✅ 重建后 Token生成成功 (slot={slot_id})")
+                                debug_logger.log_info(
+                                    f"[BrowserCaptcha] ✅ 重建后 Token生成成功 (slot={slot_id})"
+                                )
                                 return finish_result(token, slot_id)
                             debug_logger.log_warning(
                                 f"[BrowserCaptcha] 重建标签页后未拿到 token (slot={slot_id})，准备执行二次恢复"
@@ -11186,8 +12249,13 @@ class BrowserCaptchaService:
                             )
                             needs_secondary_rebuild = True
                             if self._is_browser_runtime_error(rebuild_error):
-                                if await self._recover_browser_runtime(project_id, reason=f"resident_rebuild:{slot_id}"):
-                                    slot_id, resident_info = await self._ensure_resident_tab(
+                                if await self._recover_browser_runtime(
+                                    project_id, reason=f"resident_rebuild:{slot_id}"
+                                ):
+                                    (
+                                        slot_id,
+                                        resident_info,
+                                    ) = await self._ensure_resident_tab(
                                         project_id,
                                         token_id=token_id,
                                         reserve_for_solve=True,
@@ -11252,7 +12320,9 @@ class BrowserCaptchaService:
                                         f"[BrowserCaptcha] 二次重建后 resident 仍失败 (slot={slot_id}): {second_rebuild_error}"
                                     )
                     elif not await self._probe_browser_runtime():
-                        if await self._recover_browser_runtime(project_id, reason=f"resident_rebuild_empty:{slot_id}"):
+                        if await self._recover_browser_runtime(
+                            project_id, reason=f"resident_rebuild_empty:{slot_id}"
+                        ):
                             slot_id, resident_info = await self._ensure_resident_tab(
                                 project_id,
                                 token_id=token_id,
@@ -11282,7 +12352,9 @@ class BrowserCaptchaService:
             debug_logger.log_warning(
                 f"[BrowserCaptcha] 所有常驻方式失败，fallback 到传统模式 (project: {project_id}, token_id={token_id})"
             )
-            legacy_token = await self._get_token_legacy(project_id, action, token_id=token_id)
+            legacy_token = await self._get_token_legacy(
+                project_id, action, token_id=token_id
+            )
             if legacy_token and slot_id:
                 self._resident_error_streaks.pop(slot_id, None)
             return finish_result(legacy_token, None)
@@ -11340,7 +12412,8 @@ class BrowserCaptchaService:
             async with self._resident_lock:
                 resident_info = self._resident_tabs.get(slot_id)
         if resident_info and not (
-            isinstance(resident_info.session_cookies, dict) and resident_info.session_cookies
+            isinstance(resident_info.session_cookies, dict)
+            and resident_info.session_cookies
         ):
             try:
                 await self._cache_session_cookies_for_computed(resident_info)
@@ -11351,12 +12424,16 @@ class BrowserCaptchaService:
                 )
         fingerprint = (
             dict(resident_info.fingerprint)
-            if resident_info and isinstance(resident_info.fingerprint, dict) and resident_info.fingerprint
+            if resident_info
+            and isinstance(resident_info.fingerprint, dict)
+            and resident_info.fingerprint
             else self.get_last_fingerprint()
         )
         session_cookies = (
             dict(resident_info.session_cookies)
-            if resident_info and isinstance(resident_info.session_cookies, dict) and resident_info.session_cookies
+            if resident_info
+            and isinstance(resident_info.session_cookies, dict)
+            and resident_info.session_cookies
             else None
         )
         return self._build_solve_bundle(
@@ -11405,7 +12482,9 @@ class BrowserCaptchaService:
                 label=f"resident_browser_create_context:{slot_id}",
                 create_timeout_seconds=self._navigation_timeout_seconds,
             )
-            browser_context_id = browser_context_id or self._extract_tab_browser_context_id(tab)
+            browser_context_id = (
+                browser_context_id or self._extract_tab_browser_context_id(tab)
+            )
 
             # 等待页面加载完成（减少等待时间）
             page_loaded = False
@@ -11429,7 +12508,9 @@ class BrowserCaptchaService:
                             f"[BrowserCaptcha] 等待页面时浏览器运行态断开 (slot={slot_id}, project={project_id}, token_id={token_id}): {e}"
                         )
                         raise
-                    debug_logger.log_warning(f"[BrowserCaptcha] 等待页面异常: {e}，重试 {retry + 1}/10...")
+                    debug_logger.log_warning(
+                        f"[BrowserCaptcha] 等待页面异常: {e}，重试 {retry + 1}/10..."
+                    )
                     await asyncio.sleep(0.3)  # 减少重试间隔
 
             if not page_loaded:
@@ -11455,7 +12536,9 @@ class BrowserCaptchaService:
                 force=True,
             )
 
-            if not await self._open_labs_bootstrap_page(tab, label=f"resident_init:{slot_id}"):
+            if not await self._open_labs_bootstrap_page(
+                tab, label=f"resident_init:{slot_id}"
+            ):
                 debug_logger.log_error(
                     f"[BrowserCaptcha] 打开 labs 引导页失败 (slot={slot_id}, project={project_id}, token_id={token_id})"
                 )
@@ -11538,9 +12621,13 @@ class BrowserCaptchaService:
 
         if resident_info and resident_info.tab:
             try:
-                await self._dispose_browser_context_quietly(resident_info.browser_context_id)
+                await self._dispose_browser_context_quietly(
+                    resident_info.browser_context_id
+                )
                 await self._close_tab_quietly(resident_info.tab)
-                debug_logger.log_info(f"[BrowserCaptcha] 已关闭共享常驻标签页 slot={slot_id}")
+                debug_logger.log_info(
+                    f"[BrowserCaptcha] 已关闭共享常驻标签页 slot={slot_id}"
+                )
             except Exception as e:
                 debug_logger.log_warning(f"[BrowserCaptcha] 关闭标签页时异常: {e}")
 
@@ -11555,11 +12642,17 @@ class BrowserCaptchaService:
         )
 
         # 重建标签页
-        slot_id, resident_info = await self._rebuild_resident_tab(project_id, return_slot_key=True)
+        slot_id, resident_info = await self._rebuild_resident_tab(
+            project_id, return_slot_key=True
+        )
         if resident_info and slot_id:
-            debug_logger.log_info(f"[BrowserCaptcha] ✅ 标签页已重建 (project: {project_id}, slot={slot_id})")
+            debug_logger.log_info(
+                f"[BrowserCaptcha] ✅ 标签页已重建 (project: {project_id}, slot={slot_id})"
+            )
         else:
-            debug_logger.log_error(f"[BrowserCaptcha] 标签页重建失败 (project: {project_id})")
+            debug_logger.log_error(
+                f"[BrowserCaptcha] 标签页重建失败 (project: {project_id})"
+            )
 
     async def _get_token_legacy(
         self,
@@ -11589,15 +12682,17 @@ class BrowserCaptchaService:
 
                 try:
                     debug_logger.log_info(
-                        "[BrowserCaptcha] [Legacy] 创建独立临时 context 执行验证，"
-                        "先绑 cookie 再首跳 labs.google，避免首轮请求丢登录态"
+                        "[BrowserCaptcha] 创建独立临时 context 执行验证，"
+                        "先绑定 Cookie 再打开 Flow 页面"
                     )
                     tab, browser_context_id = await self._create_isolated_context_tab(
                         PERSONAL_COOKIE_PREBIND_URL,
                         label=f"legacy_browser_create_context:{project_id}",
                         create_timeout_seconds=self._navigation_timeout_seconds,
                     )
-                    browser_context_id = browser_context_id or self._extract_tab_browser_context_id(tab)
+                    browser_context_id = (
+                        browser_context_id or self._extract_tab_browser_context_id(tab)
+                    )
                     legacy_info = ResidentTabInfo(
                         tab,
                         slot_id=f"legacy-{project_id}",
@@ -11612,8 +12707,12 @@ class BrowserCaptchaService:
                         force=True,
                     )
 
-                    if not await self._open_labs_bootstrap_page(tab, label=f"legacy:{project_id}"):
-                        debug_logger.log_error("[BrowserCaptcha] [Legacy] 打开 labs 引导页失败")
+                    if not await self._open_labs_bootstrap_page(
+                        tab, label=f"legacy:{project_id}"
+                    ):
+                        debug_logger.log_error(
+                            "[BrowserCaptcha] [Legacy] 打开 labs 引导页失败"
+                        )
                         return None
 
                     warmup_ok = await self._warmup_google_context_cookies(
@@ -11630,11 +12729,15 @@ class BrowserCaptchaService:
                     recaptcha_ready = await self._wait_for_recaptcha(tab)
 
                     if not recaptcha_ready:
-                        debug_logger.log_error("[BrowserCaptcha] [Legacy] reCAPTCHA 无法加载")
+                        debug_logger.log_error(
+                            "[BrowserCaptcha] [Legacy] reCAPTCHA 无法加载"
+                        )
                         return None
 
                     # 执行 reCAPTCHA
-                    debug_logger.log_info(f"[BrowserCaptcha] [Legacy] 执行 reCAPTCHA 验证 (action: {action})...")
+                    debug_logger.log_info(
+                        f"[BrowserCaptcha] [Legacy] 执行 reCAPTCHA 验证 (action: {action})..."
+                    )
                     token = await self._run_with_timeout(
                         self._execute_recaptcha_on_tab(tab, action),
                         timeout_seconds=self._solve_timeout_seconds,
@@ -11668,18 +12771,26 @@ class BrowserCaptchaService:
                         )
                         return token
 
-                    debug_logger.log_error("[BrowserCaptcha] [Legacy] Token获取失败（返回null）")
+                    debug_logger.log_error(
+                        "[BrowserCaptcha] [Legacy] Token获取失败（返回null）"
+                    )
                     return None
 
                 except Exception as e:
-                    if attempt < (max_attempts - 1) and self._is_browser_runtime_error(e):
+                    if attempt < (max_attempts - 1) and self._is_browser_runtime_error(
+                        e
+                    ):
                         debug_logger.log_warning(
                             f"[BrowserCaptcha] [Legacy] 浏览器运行态异常，尝试重启恢复后重试: {e}"
                         )
-                        await self._recover_browser_runtime(project_id, reason=f"legacy_attempt_{attempt + 1}")
+                        await self._recover_browser_runtime(
+                            project_id, reason=f"legacy_attempt_{attempt + 1}"
+                        )
                         continue
 
-                    debug_logger.log_error(f"[BrowserCaptcha] [Legacy] 获取token异常: {str(e)}")
+                    debug_logger.log_error(
+                        f"[BrowserCaptcha] [Legacy] 获取token异常: {str(e)}"
+                    )
                     return None
                 finally:
                     # 关闭 legacy 临时标签页（但保留浏览器）
@@ -11749,7 +12860,7 @@ class BrowserCaptchaService:
             origins = (
                 "https://www.google.com",
                 "https://www.recaptcha.net",
-                "https://labs.google",
+                "https://flow.google.com",
             )
             for origin in origins:
                 try:
@@ -11770,8 +12881,14 @@ class BrowserCaptchaService:
         except Exception as e:
             debug_logger.log_warning(f"[BrowserCaptcha] 清理缓存时异常: {e}")
 
-    async def _shutdown_browser_runtime(self, cancel_idle_reaper: bool = False, reason: str = "shutdown"):
-        if cancel_idle_reaper and self._idle_reaper_task and not self._idle_reaper_task.done():
+    async def _shutdown_browser_runtime(
+        self, cancel_idle_reaper: bool = False, reason: str = "shutdown"
+    ):
+        if (
+            cancel_idle_reaper
+            and self._idle_reaper_task
+            and not self._idle_reaper_task.done()
+        ):
             self._idle_reaper_task.cancel()
             try:
                 await self._idle_reaper_task
@@ -11785,11 +12902,15 @@ class BrowserCaptchaService:
                 await self._shutdown_browser_runtime_locked(reason=reason)
                 debug_logger.log_info(f"[BrowserCaptcha] 浏览器运行态已清理 ({reason})")
             except Exception as e:
-                debug_logger.log_error(f"[BrowserCaptcha] 清理浏览器运行态异常 ({reason}): {str(e)}")
+                debug_logger.log_error(
+                    f"[BrowserCaptcha] 清理浏览器运行态异常 ({reason}): {str(e)}"
+                )
 
     async def close(self):
         """关闭浏览器"""
-        await self._shutdown_browser_runtime(cancel_idle_reaper=True, reason="service_close")
+        await self._shutdown_browser_runtime(
+            cancel_idle_reaper=True, reason="service_close"
+        )
 
     async def open_login_window(self):
         """打开登录窗口供用户手动登录 Google"""
@@ -11799,12 +12920,18 @@ class BrowserCaptchaService:
             "https://accounts.google.com/",
             label="open_login_window",
         )
-        debug_logger.log_info("[BrowserCaptcha] 请在打开的浏览器中登录账号。登录完成后，无需关闭浏览器，脚本下次运行时会自动使用此状态。")
-        print("请在打开的浏览器中登录账号。登录完成后，无需关闭浏览器，脚本下次运行时会自动使用此状态。")
+        debug_logger.log_info(
+            "[BrowserCaptcha] 请在打开的浏览器中登录账号。登录完成后，无需关闭浏览器，脚本下次运行时会自动使用此状态。"
+        )
+        print(
+            "请在打开的浏览器中登录账号。登录完成后，无需关闭浏览器，脚本下次运行时会自动使用此状态。"
+        )
 
     # ========== Session Token 刷新 ==========
 
-    async def refresh_session_token(self, project_id: str, token_id: Optional[int] = None) -> Optional[str]:
+    async def refresh_session_token(
+        self, project_id: str, token_id: Optional[int] = None
+    ) -> Optional[str]:
         """从常驻标签页获取最新的 Session Token
         
         复用共享打码标签页，通过刷新页面并从 cookies 中提取
@@ -11841,9 +12968,13 @@ class BrowserCaptchaService:
 
             if resident_info is None or not slot_id:
                 if attempt == 0 and not await self._probe_browser_runtime():
-                    await self._recover_browser_runtime(project_id, reason="refresh_session_prepare")
+                    await self._recover_browser_runtime(
+                        project_id, reason="refresh_session_prepare"
+                    )
                     continue
-                debug_logger.log_warning(f"[BrowserCaptcha] 无法为 project_id={project_id} 获取共享常驻标签页")
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] 无法为 project_id={project_id} 获取共享常驻标签页"
+                )
                 return None
 
             if not resident_info or not resident_info.tab:
@@ -11866,7 +12997,9 @@ class BrowserCaptchaService:
                 )
                 if not resident_info or not slot_id or not resident_info.tab:
                     if attempt == 0 and not await self._probe_browser_runtime():
-                        await self._recover_browser_runtime(project_id, reason="refresh_session_rebuild_cookie_binding")
+                        await self._recover_browser_runtime(
+                            project_id, reason="refresh_session_rebuild_cookie_binding"
+                        )
                         continue
                     return None
 
@@ -11875,7 +13008,9 @@ class BrowserCaptchaService:
             try:
                 async with resident_info.solve_lock:
                     # 刷新页面以获取最新的 cookies
-                    debug_logger.log_info(f"[BrowserCaptcha] 刷新常驻标签页以获取最新 cookies...")
+                    debug_logger.log_info(
+                        f"[BrowserCaptcha] 刷新常驻标签页以获取最新 cookies..."
+                    )
                     resident_info.recaptcha_ready = False
                     await self._run_with_timeout(
                         self._tab_reload(
@@ -11925,7 +13060,9 @@ class BrowserCaptchaService:
                                 break
 
                     except Exception as e:
-                        debug_logger.log_warning(f"[BrowserCaptcha] 通过 cookies API 获取失败: {e}，尝试从 document.cookie 获取...")
+                        debug_logger.log_warning(
+                            f"[BrowserCaptcha] 通过 cookies API 获取失败: {e}，尝试从 document.cookie 获取..."
+                        )
 
                         try:
                             all_cookies = await self._tab_evaluate(
@@ -11936,11 +13073,15 @@ class BrowserCaptchaService:
                             if all_cookies:
                                 for part in all_cookies.split(";"):
                                     part = part.strip()
-                                    if part.startswith("__Secure-next-auth.session-token="):
+                                    if part.startswith(
+                                        "__Secure-next-auth.session-token="
+                                    ):
                                         session_token = part.split("=", 1)[1]
                                         break
                         except Exception as e2:
-                            debug_logger.log_error(f"[BrowserCaptcha] document.cookie 获取失败: {e2}")
+                            debug_logger.log_error(
+                                f"[BrowserCaptcha] document.cookie 获取失败: {e2}"
+                            )
 
                 duration_ms = (time.time() - start_time) * 1000
 
@@ -11950,17 +13091,25 @@ class BrowserCaptchaService:
                     self._remember_token_affinity(token_id, slot_id, resident_info)
                     self._resident_error_streaks.pop(slot_id, None)
                     self._mark_browser_health(True)
-                    debug_logger.log_info(f"[BrowserCaptcha] ✅ Session Token 获取成功（耗时 {duration_ms:.0f}ms）")
+                    debug_logger.log_info(
+                        f"[BrowserCaptcha] ✅ Session Token 获取成功（耗时 {duration_ms:.0f}ms）"
+                    )
                     return session_token
 
-                debug_logger.log_error(f"[BrowserCaptcha] ❌ 未找到 __Secure-next-auth.session-token cookie")
+                debug_logger.log_error(
+                    f"[BrowserCaptcha] ❌ 未找到 __Secure-next-auth.session-token cookie"
+                )
                 return None
 
             except Exception as e:
-                debug_logger.log_error(f"[BrowserCaptcha] 刷新 Session Token 异常: {str(e)}")
+                debug_logger.log_error(
+                    f"[BrowserCaptcha] 刷新 Session Token 异常: {str(e)}"
+                )
 
                 if attempt == 0 and self._is_browser_runtime_error(e):
-                    if await self._recover_browser_runtime(project_id, reason=f"refresh_session:{slot_id}"):
+                    if await self._recover_browser_runtime(
+                        project_id, reason=f"refresh_session:{slot_id}"
+                    ):
                         continue
 
                 slot_id, resident_info = await self._rebuild_resident_tab(
@@ -11979,15 +13128,25 @@ class BrowserCaptchaService:
                         for cookie in cookies:
                             if cookie.name == "__Secure-next-auth.session-token":
                                 resident_info.last_used_at = time.time()
-                                self._remember_project_affinity(project_id, slot_id, resident_info)
-                                self._remember_token_affinity(token_id, slot_id, resident_info)
+                                self._remember_project_affinity(
+                                    project_id, slot_id, resident_info
+                                )
+                                self._remember_token_affinity(
+                                    token_id, slot_id, resident_info
+                                )
                                 self._resident_error_streaks.pop(slot_id, None)
                                 self._mark_browser_health(True)
-                                debug_logger.log_info(f"[BrowserCaptcha] ✅ 重建后 Session Token 获取成功")
+                                debug_logger.log_info(
+                                    f"[BrowserCaptcha] ✅ 重建后 Session Token 获取成功"
+                                )
                                 return cookie.value
                     except Exception as rebuild_error:
-                        if attempt == 0 and self._is_browser_runtime_error(rebuild_error):
-                            if await self._recover_browser_runtime(project_id, reason=f"refresh_session_rebuild:{slot_id}"):
+                        if attempt == 0 and self._is_browser_runtime_error(
+                            rebuild_error
+                        ):
+                            if await self._recover_browser_runtime(
+                                project_id, reason=f"refresh_session_rebuild:{slot_id}"
+                            ):
                                 continue
 
                 return None
@@ -12047,7 +13206,9 @@ class BrowserCaptchaService:
     def get_token_pool_status(self) -> Dict[str, Any]:
         return {
             "token_pool_enabled": bool(getattr(config, "token_pool_enabled", False)),
-            "token_pool_status": "未启用" if not getattr(config, "token_pool_enabled", False) else "空闲",
+            "token_pool_status": "未启用"
+            if not getattr(config, "token_pool_enabled", False)
+            else "空闲",
             "token_pool_total_ready": 0,
             "token_pool_bucket_count": 0,
             "token_pool_waiting_requests": 0,
@@ -12078,7 +13239,9 @@ class BrowserCaptchaService:
         self._last_fingerprint = None
 
         cache_key = f"{website_url}|{website_key}|{1 if enterprise else 0}"
-        warmup_seconds = float(getattr(config, "browser_score_test_warmup_seconds", 12) or 12)
+        warmup_seconds = float(
+            getattr(config, "browser_score_test_warmup_seconds", 12) or 12
+        )
         per_request_settle_seconds = float(
             getattr(config, "browser_score_test_settle_seconds", 2.5) or 2.5
         )
@@ -12092,7 +13255,9 @@ class BrowserCaptchaService:
 
                 try:
                     if tab is None:
-                        debug_logger.log_info(f"[BrowserCaptcha] [Custom] 创建常驻测试标签页: {website_url}")
+                        debug_logger.log_info(
+                            f"[BrowserCaptcha] [Custom] 创建常驻测试标签页: {website_url}"
+                        )
                         tab = await self._browser_get(
                             website_url,
                             label="custom_browser_get",
@@ -12133,7 +13298,9 @@ class BrowserCaptchaService:
                         custom_info["recaptcha_ready"] = True
 
                     try:
-                        await self._tab_evaluate(tab, """
+                        await self._tab_evaluate(
+                            tab,
+                            """
                             (() => {
                                 try {
                                     const body = document.body || document.documentElement;
@@ -12162,7 +13329,10 @@ class BrowserCaptchaService:
                                     window.scrollTo(0, Math.min(320, document.body?.scrollHeight || 320));
                                 } catch (e) {}
                             })()
-                        """, label="custom_pre_warm_interaction", timeout_seconds=6.0)
+                        """,
+                            label="custom_pre_warm_interaction",
+                            timeout_seconds=6.0,
+                        )
                     except Exception:
                         pass
 
@@ -12172,7 +13342,9 @@ class BrowserCaptchaService:
                                 f"[BrowserCaptcha] [Custom] 首次预热测试页面 {warmup_seconds:.1f}s 后再执行 token"
                             )
                             try:
-                                await self._tab_evaluate(tab, """
+                                await self._tab_evaluate(
+                                    tab,
+                                    """
                                     (() => {
                                         try {
                                             window.scrollTo(0, Math.min(240, document.body.scrollHeight || 240));
@@ -12180,7 +13352,10 @@ class BrowserCaptchaService:
                                             window.dispatchEvent(new Event('focus'));
                                         } catch (e) {}
                                     })()
-                                """, label="custom_warmup_interaction", timeout_seconds=6.0)
+                                """,
+                                    label="custom_warmup_interaction",
+                                    timeout_seconds=6.0,
+                                )
                             except Exception:
                                 pass
                             await tab.sleep(warmup_seconds)
@@ -12191,7 +13366,9 @@ class BrowserCaptchaService:
                         )
                         await tab.sleep(per_request_settle_seconds)
 
-                    debug_logger.log_info(f"[BrowserCaptcha] [Custom] 使用常驻测试标签页执行验证 (action: {action})...")
+                    debug_logger.log_info(
+                        f"[BrowserCaptcha] [Custom] 使用常驻测试标签页执行验证 (action: {action})..."
+                    )
                     token = await self._execute_custom_recaptcha_on_tab(
                         tab=tab,
                         website_key=website_key,
@@ -12233,11 +13410,15 @@ class BrowserCaptchaService:
                         f"[BrowserCaptcha] [Custom] 尝试 {attempt + 1}/{max_retries} 失败: {str(e)}"
                     )
                     stale_info = self._custom_tabs.pop(cache_key, None)
-                    stale_tab = stale_info.get("tab") if isinstance(stale_info, dict) else None
+                    stale_tab = (
+                        stale_info.get("tab") if isinstance(stale_info, dict) else None
+                    )
                     if stale_tab:
                         await self._close_tab_quietly(stale_tab)
                     if attempt >= max_retries - 1:
-                        debug_logger.log_error(f"[BrowserCaptcha] [Custom] 获取token异常: {str(e)}")
+                        debug_logger.log_error(
+                            f"[BrowserCaptcha] [Custom] 获取token异常: {str(e)}"
+                        )
                         return None
 
             return None
@@ -12338,22 +13519,41 @@ class _PersonalBrowserPoolService:
 
     def _get_token_pool_target_size(self) -> int:
         try:
-            return max(1, min(TOKEN_POOL_SIZE_MAX, int(getattr(config, "token_pool_size", 2) or 2)))
+            return max(
+                1,
+                min(
+                    TOKEN_POOL_SIZE_MAX, int(getattr(config, "token_pool_size", 2) or 2)
+                ),
+            )
         except Exception:
             return 2
 
     def _get_token_pool_seed_project_id(self) -> str:
-        return self._normalize_project_key(getattr(config, "token_pool_seed_project_id", "") or "")
+        return self._normalize_project_key(
+            getattr(config, "token_pool_seed_project_id", "") or ""
+        )
 
     def _get_token_pool_image_target_size(self) -> int:
         try:
-            return max(0, min(TOKEN_POOL_SIZE_MAX, int(getattr(config, "token_pool_image_size", 0) or 0)))
+            return max(
+                0,
+                min(
+                    TOKEN_POOL_SIZE_MAX,
+                    int(getattr(config, "token_pool_image_size", 0) or 0),
+                ),
+            )
         except Exception:
             return 0
 
     def _get_token_pool_video_target_size(self) -> int:
         try:
-            return max(0, min(TOKEN_POOL_SIZE_MAX, int(getattr(config, "token_pool_video_size", 0) or 0)))
+            return max(
+                0,
+                min(
+                    TOKEN_POOL_SIZE_MAX,
+                    int(getattr(config, "token_pool_video_size", 0) or 0),
+                ),
+            )
         except Exception:
             return 0
 
@@ -12363,7 +13563,9 @@ class _PersonalBrowserPoolService:
         project_id: Optional[str],
         action: Optional[str],
     ) -> int:
-        normalized_action = str(action or "IMAGE_GENERATION").strip() or "IMAGE_GENERATION"
+        normalized_action = (
+            str(action or "IMAGE_GENERATION").strip() or "IMAGE_GENERATION"
+        )
         image_target_size = self._get_token_pool_image_target_size()
         video_target_size = self._get_token_pool_video_target_size()
         default_target_size = self._get_token_pool_target_size()
@@ -12385,13 +13587,27 @@ class _PersonalBrowserPoolService:
 
     def _get_token_pool_wait_timeout_seconds(self) -> float:
         try:
-            return float(max(1, min(300, int(getattr(config, "token_pool_wait_timeout_seconds", 30) or 30))))
+            return float(
+                max(
+                    1,
+                    min(
+                        300,
+                        int(
+                            getattr(config, "token_pool_wait_timeout_seconds", 30) or 30
+                        ),
+                    ),
+                )
+            )
         except Exception:
             return 30.0
 
-    def _get_token_pool_refill_parallelism(self, target_size: Optional[int] = None) -> int:
+    def _get_token_pool_refill_parallelism(
+        self, target_size: Optional[int] = None
+    ) -> int:
         try:
-            configured_browser_count = BrowserCaptchaService._resolve_configured_browser_count()
+            configured_browser_count = (
+                BrowserCaptchaService._resolve_configured_browser_count()
+            )
         except Exception:
             configured_browser_count = 1
 
@@ -12409,15 +13625,24 @@ class _PersonalBrowserPoolService:
         return max(1, min(max(1, int(target_size)), refill_capacity))
 
     def _get_token_pool_bucket_keepalive_seconds(self) -> float:
-        return max(float(getattr(config, "token_pool_ttl_seconds", 120) or 120) * 2.0, 300.0)
+        return max(
+            float(getattr(config, "token_pool_ttl_seconds", 120) or 120) * 2.0, 300.0
+        )
 
-    def _register_configured_token_pool_buckets_locked(self, *, now_value: float) -> None:
+    def _register_configured_token_pool_buckets_locked(
+        self, *, now_value: float
+    ) -> None:
         seed_project_id = self._get_token_pool_seed_project_id()
         if not seed_project_id:
             return
 
         for action in ("IMAGE_GENERATION", "VIDEO_GENERATION"):
-            if self._get_token_pool_bucket_target_size(project_id=seed_project_id, action=action) <= 0:
+            if (
+                self._get_token_pool_bucket_target_size(
+                    project_id=seed_project_id, action=action
+                )
+                <= 0
+            ):
                 continue
             self._register_token_pool_bucket_locked(
                 bucket_key=self._build_token_pool_bucket_key(
@@ -12438,7 +13663,9 @@ class _PersonalBrowserPoolService:
         action: str,
         token_id: Optional[int],
     ) -> str:
-        normalized_action = str(action or "IMAGE_GENERATION").strip() or "IMAGE_GENERATION"
+        normalized_action = (
+            str(action or "IMAGE_GENERATION").strip() or "IMAGE_GENERATION"
+        )
         return normalized_action
 
     def _get_token_pool_condition_locked(self, bucket_key: str) -> asyncio.Condition:
@@ -12521,7 +13748,10 @@ class _PersonalBrowserPoolService:
         queue = self._token_pool_queues.get(bucket_key)
         waiting_requests = int(self._token_pool_waiters.get(bucket_key, 0) or 0)
         refill_inflight = int(self._token_pool_refill_inflight.get(bucket_key, 0) or 0)
-        action_name = str(meta.get("action") or bucket_key or "IMAGE_GENERATION").strip() or "IMAGE_GENERATION"
+        action_name = (
+            str(meta.get("action") or bucket_key or "IMAGE_GENERATION").strip()
+            or "IMAGE_GENERATION"
+        )
 
         ready_count = 0
         oldest_token_age_seconds: Optional[int] = None
@@ -12531,11 +13761,21 @@ class _PersonalBrowserPoolService:
                 if float(lease.expires_at or 0.0) <= current_time:
                     continue
                 ready_count += 1
-                age_seconds = max(0, int(current_time - float(lease.created_at or current_time)))
-                expire_in_seconds = max(0, int(float(lease.expires_at or current_time) - current_time))
-                if oldest_token_age_seconds is None or age_seconds > oldest_token_age_seconds:
+                age_seconds = max(
+                    0, int(current_time - float(lease.created_at or current_time))
+                )
+                expire_in_seconds = max(
+                    0, int(float(lease.expires_at or current_time) - current_time)
+                )
+                if (
+                    oldest_token_age_seconds is None
+                    or age_seconds > oldest_token_age_seconds
+                ):
                     oldest_token_age_seconds = age_seconds
-                if next_expire_in_seconds is None or expire_in_seconds < next_expire_in_seconds:
+                if (
+                    next_expire_in_seconds is None
+                    or expire_in_seconds < next_expire_in_seconds
+                ):
                     next_expire_in_seconds = expire_in_seconds
 
         return {
@@ -12555,7 +13795,9 @@ class _PersonalBrowserPoolService:
         except asyncio.CancelledError:
             pass
         except Exception as exc:
-            debug_logger.log_warning(f"[BrowserCaptchaPool] token 池后台补货任务异常: {exc}")
+            debug_logger.log_warning(
+                f"[BrowserCaptchaPool] token 池后台补货任务异常: {exc}"
+            )
 
     @property
     def _resident_tabs(self) -> Dict[str, Any]:
@@ -12586,7 +13828,9 @@ class _PersonalBrowserPoolService:
         allow_zero: bool = False,
     ) -> list[int]:
         normalized_worker_count = resolve_effective_browser_count(worker_count)
-        normalized_per_worker_tabs = resolve_effective_personal_max_resident_tabs(per_worker_tabs)
+        normalized_per_worker_tabs = resolve_effective_personal_max_resident_tabs(
+            per_worker_tabs
+        )
         desired_total = normalized_worker_count * normalized_per_worker_tabs
         effective_total = min(PERSONAL_POOL_MAX_TOTAL_RESIDENT_TABS, desired_total)
         if total_limit is not None:
@@ -12618,7 +13862,9 @@ class _PersonalBrowserPoolService:
             else browser_count
         )
         resolved_per_worker_tabs = resolve_effective_personal_max_resident_tabs(
-            config.personal_max_resident_tabs if per_worker_tabs is None else per_worker_tabs
+            config.personal_max_resident_tabs
+            if per_worker_tabs is None
+            else per_worker_tabs
         )
         return min(
             PERSONAL_POOL_MAX_TOTAL_RESIDENT_TABS,
@@ -12656,7 +13902,9 @@ class _PersonalBrowserPoolService:
 
         normalized_project_key = self._normalize_project_key(project_id)
         if normalized_project_key:
-            self._project_worker_affinity[normalized_project_key] = resolved_worker_index
+            self._project_worker_affinity[normalized_project_key] = (
+                resolved_worker_index
+            )
             self._trim_affinity_cache(self._project_worker_affinity)
 
         normalized_token_key = self._normalize_token_key(token_id)
@@ -12693,10 +13941,15 @@ class _PersonalBrowserPoolService:
         normalized_project_key = self._normalize_project_key(project_id)
         if not normalized_project_key:
             return False
-        if normalized_project_key in (getattr(worker, "_project_resident_affinity", {}) or {}):
+        if normalized_project_key in (
+            getattr(worker, "_project_resident_affinity", {}) or {}
+        ):
             return True
         for resident_info in (getattr(worker, "_resident_tabs", {}) or {}).values():
-            if str(getattr(resident_info, "project_id", "") or "").strip() == normalized_project_key:
+            if (
+                str(getattr(resident_info, "project_id", "") or "").strip()
+                == normalized_project_key
+            ):
                 return True
         return False
 
@@ -12708,11 +13961,15 @@ class _PersonalBrowserPoolService:
         normalized_token_key = self._normalize_token_key(token_id)
         if not normalized_token_key:
             return False
-        if normalized_token_key in (getattr(worker, "_token_resident_affinity", {}) or {}):
+        if normalized_token_key in (
+            getattr(worker, "_token_resident_affinity", {}) or {}
+        ):
             return True
         for resident_info in (getattr(worker, "_resident_tabs", {}) or {}).values():
             try:
-                if int(getattr(resident_info, "token_id", 0) or 0) == int(normalized_token_key):
+                if int(getattr(resident_info, "token_id", 0) or 0) == int(
+                    normalized_token_key
+                ):
                     return True
             except Exception:
                 continue
@@ -12764,9 +14021,14 @@ class _PersonalBrowserPoolService:
         return 1
 
     @staticmethod
-    def _worker_launch_cooldown_remaining_seconds(worker: BrowserCaptchaService) -> float:
+    def _worker_launch_cooldown_remaining_seconds(
+        worker: BrowserCaptchaService,
+    ) -> float:
         try:
-            return max(0.0, float(worker._get_browser_launch_cooldown_remaining_seconds() or 0.0))
+            return max(
+                0.0,
+                float(worker._get_browser_launch_cooldown_remaining_seconds() or 0.0),
+            )
         except Exception:
             return 0.0
 
@@ -12778,12 +14040,18 @@ class _PersonalBrowserPoolService:
         affinity_preferred: bool = False,
     ) -> tuple[int, int, int, int, int, int, int]:
         reservations = int(self._worker_dispatch_reservations.get(worker_index, 0) or 0)
-        fresh_restart_penalty = 1 if self._worker_has_pending_fresh_restart(worker) else 0
+        fresh_restart_penalty = (
+            1 if self._worker_has_pending_fresh_restart(worker) else 0
+        )
         runtime_unavailable = self._worker_runtime_unavailable_score(worker)
-        launch_cooldown_penalty = 1 if self._worker_launch_cooldown_remaining_seconds(worker) > 0.0 else 0
+        launch_cooldown_penalty = (
+            1 if self._worker_launch_cooldown_remaining_seconds(worker) > 0.0 else 0
+        )
         busy_score = reservations + self._worker_busy_score(worker)
         resident_cold = 0 if worker.get_resident_count() > 0 else 1
-        round_robin_offset = (worker_index - self._round_robin_index) % max(len(self._workers), 1)
+        round_robin_offset = (worker_index - self._round_robin_index) % max(
+            len(self._workers), 1
+        )
         affinity_penalty = 0 if affinity_preferred else 1
         return (
             fresh_restart_penalty,
@@ -12795,7 +14063,9 @@ class _PersonalBrowserPoolService:
             round_robin_offset,
         )
 
-    def _find_worker_index_for_project(self, project_id: Optional[str]) -> Optional[int]:
+    def _find_worker_index_for_project(
+        self, project_id: Optional[str]
+    ) -> Optional[int]:
         normalized_project_key = self._normalize_project_key(project_id)
         if not normalized_project_key:
             return None
@@ -12818,7 +14088,9 @@ class _PersonalBrowserPoolService:
 
         mapped_index = self._token_worker_affinity.get(normalized_token_key)
         if mapped_index is not None and 0 <= mapped_index < len(self._workers):
-            if self._worker_has_token_mapping(self._workers[mapped_index], normalized_token_key):
+            if self._worker_has_token_mapping(
+                self._workers[mapped_index], normalized_token_key
+            ):
                 return mapped_index
             self._token_worker_affinity.pop(normalized_token_key, None)
 
@@ -12854,15 +14126,23 @@ class _PersonalBrowserPoolService:
             ):
                 if candidate is None or not (0 <= candidate < worker_count):
                     continue
-                if candidate not in preferred_indexes and candidate not in soft_affinity_indexes:
+                if (
+                    candidate not in preferred_indexes
+                    and candidate not in soft_affinity_indexes
+                ):
                     soft_affinity_indexes.append(candidate)
 
         preferred_indexes.extend(soft_affinity_indexes)
 
-        remaining_indexes = [index for index in range(worker_count) if index not in preferred_indexes]
+        remaining_indexes = [
+            index for index in range(worker_count) if index not in preferred_indexes
+        ]
         if remaining_indexes:
             rotation_offset = self._round_robin_index % len(remaining_indexes)
-            rotated_indexes = remaining_indexes[rotation_offset:] + remaining_indexes[:rotation_offset]
+            rotated_indexes = (
+                remaining_indexes[rotation_offset:]
+                + remaining_indexes[:rotation_offset]
+            )
             scored_indexes = sorted(
                 enumerate(rotated_indexes),
                 key=lambda item: (
@@ -12881,14 +14161,24 @@ class _PersonalBrowserPoolService:
     async def _ensure_idle_worker_reaper(self) -> None:
         if self._closing:
             return
-        if self._idle_worker_reaper_task is None or self._idle_worker_reaper_task.done():
-            self._idle_worker_reaper_task = asyncio.create_task(self._idle_worker_reaper_loop())
+        if (
+            self._idle_worker_reaper_task is None
+            or self._idle_worker_reaper_task.done()
+        ):
+            self._idle_worker_reaper_task = asyncio.create_task(
+                self._idle_worker_reaper_loop()
+            )
 
     async def _ensure_token_pool_maintainer(self) -> None:
         if self._closing or not self._is_token_pool_enabled():
             return
-        if self._token_pool_maintainer_task is None or self._token_pool_maintainer_task.done():
-            self._token_pool_maintainer_task = asyncio.create_task(self._token_pool_maintainer_loop())
+        if (
+            self._token_pool_maintainer_task is None
+            or self._token_pool_maintainer_task.done()
+        ):
+            self._token_pool_maintainer_task = asyncio.create_task(
+                self._token_pool_maintainer_loop()
+            )
 
     async def _reclaim_pool_memory_pressure(
         self,
@@ -12951,7 +14241,9 @@ class _PersonalBrowserPoolService:
             except asyncio.CancelledError:
                 return
             except Exception as exc:
-                debug_logger.log_warning(f"[BrowserCaptchaPool] token 池维护循环异常: {exc}")
+                debug_logger.log_warning(
+                    f"[BrowserCaptchaPool] token 池维护循环异常: {exc}"
+                )
 
     async def _maintain_token_pool_once(self) -> None:
         spawn_jobs: list[Dict[str, Any]] = []
@@ -12978,12 +14270,17 @@ class _PersonalBrowserPoolService:
                     *self._token_pool_waiters.keys(),
                 }
             )
-            total_inflight = sum(max(0, int(value or 0)) for value in self._token_pool_refill_inflight.values())
+            total_inflight = sum(
+                max(0, int(value or 0))
+                for value in self._token_pool_refill_inflight.values()
+            )
 
             for bucket_key in bucket_keys:
                 self._prune_token_pool_bucket_locked(bucket_key, now_value)
                 waiting_count = int(self._token_pool_waiters.get(bucket_key, 0) or 0)
-                inflight_count = int(self._token_pool_refill_inflight.get(bucket_key, 0) or 0)
+                inflight_count = int(
+                    self._token_pool_refill_inflight.get(bucket_key, 0) or 0
+                )
                 queue = self._token_pool_queues.get(bucket_key)
                 ready_count = len(queue) if queue else 0
                 meta = self._token_pool_bucket_meta.get(bucket_key)
@@ -12993,7 +14290,10 @@ class _PersonalBrowserPoolService:
                     ready_count <= 0
                     and inflight_count <= 0
                     and waiting_count <= 0
-                    and (not last_requested_at or (now_value - last_requested_at) >= keepalive_seconds)
+                    and (
+                        not last_requested_at
+                        or (now_value - last_requested_at) >= keepalive_seconds
+                    )
                 ):
                     self._cleanup_token_pool_bucket_locked(bucket_key)
                     continue
@@ -13014,7 +14314,10 @@ class _PersonalBrowserPoolService:
                 if ready_count + inflight_count >= target_size:
                     continue
 
-                while total_inflight < refill_parallelism and (ready_count + inflight_count) < target_size:
+                while (
+                    total_inflight < refill_parallelism
+                    and (ready_count + inflight_count) < target_size
+                ):
                     self._token_pool_refill_inflight[bucket_key] = inflight_count + 1
                     inflight_count += 1
                     total_inflight += 1
@@ -13030,7 +14333,10 @@ class _PersonalBrowserPoolService:
     async def _token_pool_refill_once(self, bucket_meta: Dict[str, Any]) -> None:
         bucket_key = str(bucket_meta.get("bucket_key") or "").strip()
         project_id = str(bucket_meta.get("project_id") or "").strip()
-        action = str(bucket_meta.get("action") or "IMAGE_GENERATION").strip() or "IMAGE_GENERATION"
+        action = (
+            str(bucket_meta.get("action") or "IMAGE_GENERATION").strip()
+            or "IMAGE_GENERATION"
+        )
         token_id = bucket_meta.get("token_id")
 
         try:
@@ -13060,7 +14366,8 @@ class _PersonalBrowserPoolService:
                 worker_index=self._parse_worker_index_from_slot_id(slot_id),
                 solve_bundle=dict(solve_bundle),
                 created_at=created_at,
-                expires_at=created_at + float(getattr(config, "token_pool_ttl_seconds", 120) or 120),
+                expires_at=created_at
+                + float(getattr(config, "token_pool_ttl_seconds", 120) or 120),
             )
 
             async with self._token_pool_lock:
@@ -13092,7 +14399,9 @@ class _PersonalBrowserPoolService:
             )
         finally:
             async with self._token_pool_lock:
-                current_value = int(self._token_pool_refill_inflight.get(bucket_key, 0) or 0)
+                current_value = int(
+                    self._token_pool_refill_inflight.get(bucket_key, 0) or 0
+                )
                 if current_value <= 1:
                     self._token_pool_refill_inflight.pop(bucket_key, None)
                 else:
@@ -13125,14 +14434,18 @@ class _PersonalBrowserPoolService:
                 token_id=token_id,
                 now_value=now_value,
             )
-            lease = self._pop_ready_token_pool_lease_locked(bucket_key, now_value=now_value)
+            lease = self._pop_ready_token_pool_lease_locked(
+                bucket_key, now_value=now_value
+            )
             if lease is not None:
                 self._token_pool_stats["hit_count"] += 1
                 self._token_pool_stats["served_count"] += 1
                 return lease
             self._token_pool_stats["miss_count"] += 1
             self._token_pool_stats["wait_count"] += 1
-            self._token_pool_waiters[bucket_key] = int(self._token_pool_waiters.get(bucket_key, 0) or 0) + 1
+            self._token_pool_waiters[bucket_key] = (
+                int(self._token_pool_waiters.get(bucket_key, 0) or 0) + 1
+            )
 
         try:
             await self._ensure_token_pool_maintainer()
@@ -13161,13 +14474,17 @@ class _PersonalBrowserPoolService:
                         break
                     condition = self._get_token_pool_condition_locked(bucket_key)
                     try:
-                        await asyncio.wait_for(condition.wait(), timeout=remaining_seconds)
+                        await asyncio.wait_for(
+                            condition.wait(), timeout=remaining_seconds
+                        )
                     except asyncio.TimeoutError:
                         break
 
                 await self._maintain_token_pool_once()
 
-            bucket_snapshot = self._summarize_token_pool_bucket(bucket_key, now_value=time.time())
+            bucket_snapshot = self._summarize_token_pool_bucket(
+                bucket_key, now_value=time.time()
+            )
             debug_logger.log_warning(
                 f"[BrowserCaptchaPool] token 池等待超时，严格池模式下不回退同步获取 "
                 f"(action_bucket={bucket_snapshot['action']}, project_id={project_id or '<empty>'}, "
@@ -13191,7 +14508,9 @@ class _PersonalBrowserPoolService:
                 try:
                     idle_ttl_seconds = max(
                         60,
-                        int(getattr(config, "personal_idle_tab_ttl_seconds", 600) or 600),
+                        int(
+                            getattr(config, "personal_idle_tab_ttl_seconds", 600) or 600
+                        ),
                     )
                 except Exception:
                     idle_ttl_seconds = 600
@@ -13200,7 +14519,10 @@ class _PersonalBrowserPoolService:
                     candidates = [
                         (worker_index, worker)
                         for worker_index, worker in enumerate(self._workers)
-                        if int(self._worker_dispatch_reservations.get(worker_index, 0) or 0) <= 0
+                        if int(
+                            self._worker_dispatch_reservations.get(worker_index, 0) or 0
+                        )
+                        <= 0
                     ]
 
                 for worker_index, worker in candidates:
@@ -13223,7 +14545,9 @@ class _PersonalBrowserPoolService:
             except asyncio.CancelledError:
                 return
             except Exception as e:
-                debug_logger.log_warning(f"[BrowserCaptchaPool] 空闲浏览器实例回收循环异常: {e}")
+                debug_logger.log_warning(
+                    f"[BrowserCaptchaPool] 空闲浏览器实例回收循环异常: {e}"
+                )
 
     async def _acquire_worker(
         self,
@@ -13278,12 +14602,17 @@ class _PersonalBrowserPoolService:
             selectable_indexes = [
                 worker_index
                 for worker_index in candidate_indexes
-                if int(getattr(self._workers[worker_index], "_max_resident_tabs", 0) or 0) > 0
+                if int(
+                    getattr(self._workers[worker_index], "_max_resident_tabs", 0) or 0
+                )
+                > 0
             ] or candidate_indexes
             non_restarting_indexes = [
                 worker_index
                 for worker_index in selectable_indexes
-                if not self._worker_has_pending_fresh_restart(self._workers[worker_index])
+                if not self._worker_has_pending_fresh_restart(
+                    self._workers[worker_index]
+                )
             ]
             if non_restarting_indexes:
                 selectable_indexes = non_restarting_indexes
@@ -13306,13 +14635,21 @@ class _PersonalBrowserPoolService:
                 ),
             )
             self._worker_dispatch_reservations[selected_worker_index] = (
-                int(self._worker_dispatch_reservations.get(selected_worker_index, 0) or 0) + 1
+                int(
+                    self._worker_dispatch_reservations.get(selected_worker_index, 0)
+                    or 0
+                )
+                + 1
             )
             normalized_project_key = self._normalize_project_key(project_id)
             if normalized_project_key:
-                self._project_worker_affinity[normalized_project_key] = selected_worker_index
+                self._project_worker_affinity[normalized_project_key] = (
+                    selected_worker_index
+                )
                 self._trim_affinity_cache(self._project_worker_affinity)
-            self._round_robin_index = (selected_worker_index + 1) % max(len(self._workers), 1)
+            self._round_robin_index = (selected_worker_index + 1) % max(
+                len(self._workers), 1
+            )
             debug_logger.log_info(
                 "[BrowserCaptchaPool] worker 已选中 "
                 f"(project_id={project_id or '<empty>'}, token_id={token_id}, "
@@ -13351,7 +14688,8 @@ class _PersonalBrowserPoolService:
             if (
                 preferred_worker_index is not None
                 and 0 <= preferred_worker_index < len(project_buckets)
-                and len(project_buckets[preferred_worker_index]) < worker_limits[preferred_worker_index]
+                and len(project_buckets[preferred_worker_index])
+                < worker_limits[preferred_worker_index]
             ):
                 project_buckets[preferred_worker_index].append(project_id)
                 continue
@@ -13367,7 +14705,8 @@ class _PersonalBrowserPoolService:
             selected_worker_index = min(
                 candidate_indexes,
                 key=lambda index: (
-                    self._workers[index].get_resident_count() + len(project_buckets[index]),
+                    self._workers[index].get_resident_count()
+                    + len(project_buckets[index]),
                     self._worker_busy_score(self._workers[index]),
                     index,
                 ),
@@ -13386,13 +14725,17 @@ class _PersonalBrowserPoolService:
         async with self._reload_lock:
             async with self._worker_dispatch_lock:
                 self.headless = bool(getattr(config, "personal_headless", False))
-                configured_browser_count = BrowserCaptchaService._resolve_configured_browser_count()
+                configured_browser_count = (
+                    BrowserCaptchaService._resolve_configured_browser_count()
+                )
                 per_worker_tabs = self._resolve_worker_resident_tabs()
                 worker_limits = self._build_worker_tab_limits(
                     per_worker_tabs,
                     configured_browser_count,
                 )
-                effective_total_tabs = sum(max(0, int(limit or 0)) for limit in worker_limits)
+                effective_total_tabs = sum(
+                    max(0, int(limit or 0)) for limit in worker_limits
+                )
 
                 current_worker_count = len(self._workers)
                 if current_worker_count > len(worker_limits):
@@ -13406,7 +14749,9 @@ class _PersonalBrowserPoolService:
                             browser_instance_id=index + 1,
                             max_resident_tabs_override=tab_limit,
                         )
-                        worker._idle_reaper_task = asyncio.create_task(worker._idle_tab_reaper_loop())
+                        worker._idle_reaper_task = asyncio.create_task(
+                            worker._idle_tab_reaper_loop()
+                        )
                         self._workers.append(worker)
                         continue
 
@@ -13441,7 +14786,9 @@ class _PersonalBrowserPoolService:
             try:
                 await worker.close()
             except Exception as e:
-                debug_logger.log_warning(f"[BrowserCaptchaPool] 关闭多余浏览器实例失败: {e}")
+                debug_logger.log_warning(
+                    f"[BrowserCaptchaPool] 关闭多余浏览器实例失败: {e}"
+                )
 
         if workers_to_reload:
             await asyncio.gather(
@@ -13456,7 +14803,10 @@ class _PersonalBrowserPoolService:
         if self._is_token_pool_enabled():
             await self._ensure_token_pool_maintainer()
             await self._maintain_token_pool_once()
-        elif self._token_pool_maintainer_task is not None and not self._token_pool_maintainer_task.done():
+        elif (
+            self._token_pool_maintainer_task is not None
+            and not self._token_pool_maintainer_task.done()
+        ):
             self._token_pool_maintainer_task.cancel()
             try:
                 await self._token_pool_maintainer_task
@@ -13517,7 +14867,9 @@ class _PersonalBrowserPoolService:
             try:
                 await worker.close()
             except Exception as e:
-                debug_logger.log_warning(f"[BrowserCaptchaPool] 关闭浏览器实例失败: {e}")
+                debug_logger.log_warning(
+                    f"[BrowserCaptchaPool] 关闭浏览器实例失败: {e}"
+                )
 
     async def _get_token_direct(
         self,
@@ -13555,7 +14907,9 @@ class _PersonalBrowserPoolService:
                     return_slot_id=True,
                 )
             except Exception as e:
-                worker_label = worker_index + 1 if worker_index is not None else "unknown"
+                worker_label = (
+                    worker_index + 1 if worker_index is not None else "unknown"
+                )
                 debug_logger.log_warning(
                     f"[BrowserCaptchaPool] 浏览器实例打码失败，尝试切换其他实例 (worker={worker_label}): {e}"
                 )
@@ -13619,7 +14973,9 @@ class _PersonalBrowserPoolService:
                     token_id=token_id,
                 )
             except Exception as e:
-                worker_label = worker_index + 1 if worker_index is not None else "unknown"
+                worker_label = (
+                    worker_index + 1 if worker_index is not None else "unknown"
+                )
                 debug_logger.log_warning(
                     f"[BrowserCaptchaPool] 浏览器实例打码(bundle)失败，尝试切换其他实例 (worker={worker_label}): {e}"
                 )
@@ -13632,7 +14988,10 @@ class _PersonalBrowserPoolService:
             finally:
                 await self._release_worker_reservation(worker_index)
 
-            if not isinstance(solve_bundle, dict) or not str(solve_bundle.get("token") or "").strip():
+            if (
+                not isinstance(solve_bundle, dict)
+                or not str(solve_bundle.get("token") or "").strip()
+            ):
                 continue
 
             slot_id = str(solve_bundle.get("slot_id") or "").strip() or None
@@ -13705,7 +15064,9 @@ class _PersonalBrowserPoolService:
             token_id=token_id,
         )
         if lease is None:
-            bucket_snapshot = self._summarize_token_pool_bucket(bucket_key, now_value=time.time())
+            bucket_snapshot = self._summarize_token_pool_bucket(
+                bucket_key, now_value=time.time()
+            )
             raise TokenPoolTimeoutError(
                 "token 池等待超时且未命中可用 token "
                 f"(action_bucket={bucket_snapshot['action']}, project_id={project_id or '<empty>'}, "
@@ -13759,7 +15120,9 @@ class _PersonalBrowserPoolService:
             token_id=token_id,
         )
         if lease is None:
-            bucket_snapshot = self._summarize_token_pool_bucket(bucket_key, now_value=time.time())
+            bucket_snapshot = self._summarize_token_pool_bucket(
+                bucket_key, now_value=time.time()
+            )
             raise TokenPoolTimeoutError(
                 "token 池等待超时且未命中可用 token "
                 f"(action_bucket={bucket_snapshot['action']}, project_id={project_id or '<empty>'}, "
@@ -13787,7 +15150,9 @@ class _PersonalBrowserPoolService:
             "token_id": lease.token_id,
             "slot_id": lease.slot_id,
             "worker_index": lease.worker_index,
-            "fingerprint": dict(worker_fingerprint) if isinstance(worker_fingerprint, dict) and worker_fingerprint else None,
+            "fingerprint": dict(worker_fingerprint)
+            if isinstance(worker_fingerprint, dict) and worker_fingerprint
+            else None,
             "proxy_url": proxy_url,
             "session_cookies": None,
             "issued_at": lease.created_at,
@@ -13804,7 +15169,9 @@ class _PersonalBrowserPoolService:
     ):
         await self._ensure_workers()
         exact_worker_index = self._parse_worker_index_from_slot_id(slot_id)
-        if exact_worker_index is not None and 0 <= exact_worker_index < len(self._workers):
+        if exact_worker_index is not None and 0 <= exact_worker_index < len(
+            self._workers
+        ):
             await self._workers[exact_worker_index].report_flow_error(
                 project_id,
                 error_reason,
@@ -13832,7 +15199,9 @@ class _PersonalBrowserPoolService:
                 candidate_indexes.append(self._last_successful_worker_index)
 
         if not candidate_indexes:
-            resolved_candidates = self._resolve_worker_candidate_indexes(project_id=project_id, token_id=token_id)
+            resolved_candidates = self._resolve_worker_candidate_indexes(
+                project_id=project_id, token_id=token_id
+            )
             if resolved_candidates:
                 candidate_indexes.append(resolved_candidates[0])
 
@@ -13847,7 +15216,9 @@ class _PersonalBrowserPoolService:
 
     async def invalidate_token(self, project_id: str):
         await self._ensure_workers()
-        candidate_indexes = self._resolve_worker_candidate_indexes(project_id=project_id)
+        candidate_indexes = self._resolve_worker_candidate_indexes(
+            project_id=project_id
+        )
         for worker_index in candidate_indexes:
             await self._workers[worker_index].invalidate_token(project_id)
 
@@ -13866,10 +15237,15 @@ class _PersonalBrowserPoolService:
         if not project_ids or not self._workers:
             return []
 
-        total_limit = max(1, min(
+        total_limit = max(
+            1,
+            min(
             int(limit or 1),
-            self._resolve_effective_pool_tab_capacity(browser_count=len(self._workers)),
-        ))
+                self._resolve_effective_pool_tab_capacity(
+                    browser_count=len(self._workers)
+                ),
+            ),
+        )
         worker_limits = self._build_worker_tab_limits(
             self._resolve_worker_resident_tabs(),
             len(self._workers),
@@ -13877,14 +15253,22 @@ class _PersonalBrowserPoolService:
             allow_zero=True,
         )
         project_buckets = self._build_project_buckets_for_workers(
-            [str(project_id).strip() for project_id in project_ids if str(project_id or "").strip()],
+            [
+                str(project_id).strip()
+                for project_id in project_ids
+                if str(project_id or "").strip()
+            ],
             worker_limits=worker_limits,
         )
 
         warmup_tasks = [
-            worker.warmup_resident_tabs(project_buckets[index], limit=worker_limits[index])
+            worker.warmup_resident_tabs(
+                project_buckets[index], limit=worker_limits[index]
+            )
             for index, worker in enumerate(self._workers)
-            if index < len(project_buckets) and project_buckets[index] and worker_limits[index] > 0
+            if index < len(project_buckets)
+            and project_buckets[index]
+            and worker_limits[index] > 0
         ]
         if not warmup_tasks:
             return []
@@ -13904,7 +15288,9 @@ class _PersonalBrowserPoolService:
                         return warmed_slots
         return warmed_slots
 
-    async def refresh_session_token(self, project_id: str, token_id: Optional[int] = None) -> Optional[str]:
+    async def refresh_session_token(
+        self, project_id: str, token_id: Optional[int] = None
+    ) -> Optional[str]:
         await self._ensure_workers()
         excluded_indexes: set[int] = set()
         max_attempts = min(len(self._workers), 3)
@@ -13919,9 +15305,13 @@ class _PersonalBrowserPoolService:
                     excluded_indexes=excluded_indexes,
                 )
                 excluded_indexes.add(worker_index)
-                session_token = await worker.refresh_session_token(project_id, token_id=token_id)
+                session_token = await worker.refresh_session_token(
+                    project_id, token_id=token_id
+                )
             except Exception as e:
-                worker_label = worker_index + 1 if worker_index is not None else "unknown"
+                worker_label = (
+                    worker_index + 1 if worker_index is not None else "unknown"
+                )
                 debug_logger.log_warning(
                     f"[BrowserCaptchaPool] Session Token 刷新失败，尝试切换其他实例 (worker={worker_label}): {e}"
                 )
@@ -13930,7 +15320,9 @@ class _PersonalBrowserPoolService:
                 await self._release_worker_reservation(worker_index)
             if session_token:
                 self._last_successful_worker_index = worker_index
-                self._remember_affinity(project_id=project_id, token_id=token_id, worker_index=worker_index)
+                self._remember_affinity(
+                    project_id=project_id, token_id=token_id, worker_index=worker_index
+                )
                 return session_token
         return None
 
@@ -13949,7 +15341,9 @@ class _PersonalBrowserPoolService:
         await self._ensure_workers()
         if project_id:
             exact_worker_index = self._parse_worker_index_from_slot_id(project_id)
-            if exact_worker_index is not None and 0 <= exact_worker_index < len(self._workers):
+            if exact_worker_index is not None and 0 <= exact_worker_index < len(
+                self._workers
+            ):
                 await self._workers[exact_worker_index].stop_resident_mode(project_id)
                 return
             worker_index = self._find_worker_index_for_project(project_id)
@@ -13996,10 +15390,18 @@ class _PersonalBrowserPoolService:
                 "token_pool_oldest_token_age_seconds": None,
                 "token_pool_next_expire_in_seconds": None,
                 "token_pool_bucket_details": [],
-                "token_pool_hit_count": int(self._token_pool_stats.get("hit_count", 0) or 0),
-                "token_pool_miss_count": int(self._token_pool_stats.get("miss_count", 0) or 0),
-                "token_pool_wait_count": int(self._token_pool_stats.get("wait_count", 0) or 0),
-                "token_pool_expired_count": int(self._token_pool_stats.get("expired_count", 0) or 0),
+                "token_pool_hit_count": int(
+                    self._token_pool_stats.get("hit_count", 0) or 0
+                ),
+                "token_pool_miss_count": int(
+                    self._token_pool_stats.get("miss_count", 0) or 0
+                ),
+                "token_pool_wait_count": int(
+                    self._token_pool_stats.get("wait_count", 0) or 0
+                ),
+                "token_pool_expired_count": int(
+                    self._token_pool_stats.get("expired_count", 0) or 0
+                ),
             }
 
         now_value = time.time()
@@ -14007,11 +15409,22 @@ class _PersonalBrowserPoolService:
             {
                 *self._token_pool_bucket_meta.keys(),
                 *[key for key, queue in self._token_pool_queues.items() if queue],
-                *[key for key, value in self._token_pool_waiters.items() if int(value or 0) > 0],
-                *[key for key, value in self._token_pool_refill_inflight.items() if int(value or 0) > 0],
+                *[
+                    key
+                    for key, value in self._token_pool_waiters.items()
+                    if int(value or 0) > 0
+                ],
+                *[
+                    key
+                    for key, value in self._token_pool_refill_inflight.items()
+                    if int(value or 0) > 0
+                ],
             }
         )
-        bucket_details = [self._summarize_token_pool_bucket(bucket_key, now_value=now_value) for bucket_key in bucket_keys]
+        bucket_details = [
+            self._summarize_token_pool_bucket(bucket_key, now_value=now_value)
+            for bucket_key in bucket_keys
+        ]
         total_ready = sum(int(detail["ready_count"] or 0) for detail in bucket_details)
         oldest_token_age_seconds: Optional[int] = None
         next_expire_in_seconds: Optional[int] = None
@@ -14019,16 +15432,22 @@ class _PersonalBrowserPoolService:
             age_seconds = detail.get("oldest_token_age_seconds")
             expire_in_seconds = detail.get("next_expire_in_seconds")
             if age_seconds is not None and (
-                oldest_token_age_seconds is None or int(age_seconds) > oldest_token_age_seconds
+                oldest_token_age_seconds is None
+                or int(age_seconds) > oldest_token_age_seconds
             ):
                 oldest_token_age_seconds = int(age_seconds)
             if expire_in_seconds is not None and (
-                next_expire_in_seconds is None or int(expire_in_seconds) < next_expire_in_seconds
+                next_expire_in_seconds is None
+                or int(expire_in_seconds) < next_expire_in_seconds
             ):
                 next_expire_in_seconds = int(expire_in_seconds)
 
-        waiting_requests = sum(int(detail["waiting_requests"] or 0) for detail in bucket_details)
-        refill_inflight = sum(int(detail["refill_inflight"] or 0) for detail in bucket_details)
+        waiting_requests = sum(
+            int(detail["waiting_requests"] or 0) for detail in bucket_details
+        )
+        refill_inflight = sum(
+            int(detail["refill_inflight"] or 0) for detail in bucket_details
+        )
         bucket_count = len(bucket_details)
 
         if total_ready > 0:
@@ -14049,20 +15468,37 @@ class _PersonalBrowserPoolService:
             "token_pool_bucket_count": bucket_count,
             "token_pool_waiting_requests": waiting_requests,
             "token_pool_refill_inflight": refill_inflight,
-            "token_pool_last_refill_at": self._format_status_timestamp(self._token_pool_last_refill_at),
-            "token_pool_last_token_at": self._format_status_timestamp(self._token_pool_last_token_at),
+            "token_pool_last_refill_at": self._format_status_timestamp(
+                self._token_pool_last_refill_at
+            ),
+            "token_pool_last_token_at": self._format_status_timestamp(
+                self._token_pool_last_token_at
+            ),
             "token_pool_oldest_token_age_seconds": oldest_token_age_seconds,
             "token_pool_next_expire_in_seconds": next_expire_in_seconds,
             "token_pool_bucket_details": bucket_details,
-            "token_pool_hit_count": int(self._token_pool_stats.get("hit_count", 0) or 0),
-            "token_pool_miss_count": int(self._token_pool_stats.get("miss_count", 0) or 0),
-            "token_pool_wait_count": int(self._token_pool_stats.get("wait_count", 0) or 0),
-            "token_pool_expired_count": int(self._token_pool_stats.get("expired_count", 0) or 0),
+            "token_pool_hit_count": int(
+                self._token_pool_stats.get("hit_count", 0) or 0
+            ),
+            "token_pool_miss_count": int(
+                self._token_pool_stats.get("miss_count", 0) or 0
+            ),
+            "token_pool_wait_count": int(
+                self._token_pool_stats.get("wait_count", 0) or 0
+            ),
+            "token_pool_expired_count": int(
+                self._token_pool_stats.get("expired_count", 0) or 0
+            ),
         }
 
     def get_last_fingerprint(self) -> Optional[Dict[str, Any]]:
-        if self._last_successful_worker_index is not None and 0 <= self._last_successful_worker_index < len(self._workers):
-            fingerprint = self._workers[self._last_successful_worker_index].get_last_fingerprint()
+        if (
+            self._last_successful_worker_index is not None
+            and 0 <= self._last_successful_worker_index < len(self._workers)
+        ):
+            fingerprint = self._workers[
+                self._last_successful_worker_index
+            ].get_last_fingerprint()
             if fingerprint:
                 return fingerprint
         for worker in self._workers:

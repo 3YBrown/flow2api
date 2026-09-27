@@ -1,8 +1,10 @@
 """Proxy management module"""
+
 from typing import Optional
 import re
 from ..core.database import Database
 from ..core.models import ProxyConfig
+
 
 class ProxyManager:
     """Proxy configuration manager"""
@@ -47,7 +49,6 @@ class ProxyManager:
 
         # 协议前缀格式
         if line.startswith(("http://", "https://", "socks5://", "socks5h://")):
-
             # 已是标准 user:pass@host:port（或 host:port）
             if "@" in line:
                 return line
@@ -132,7 +133,7 @@ class ProxyManager:
         enabled: bool,
         proxy_url: Optional[str],
         media_proxy_enabled: Optional[bool] = None,
-        media_proxy_url: Optional[str] = None
+        media_proxy_url: Optional[str] = None,
     ):
         """Update proxy configuration"""
         normalized_proxy_url = self.normalize_proxy_url(proxy_url)
@@ -142,7 +143,7 @@ class ProxyManager:
             enabled=enabled,
             proxy_url=normalized_proxy_url,
             media_proxy_enabled=media_proxy_enabled,
-            media_proxy_url=normalized_media_proxy_url
+            media_proxy_url=normalized_media_proxy_url,
         )
 
     async def get_proxy_config(self) -> ProxyConfig:

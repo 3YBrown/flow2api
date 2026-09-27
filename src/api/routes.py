@@ -9,7 +9,15 @@ import re
 from urllib.parse import urlparse
 
 from curl_cffi.requests import AsyncSession
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..core.auth import AuthManager, verify_api_key_flexible
@@ -29,14 +37,16 @@ router = APIRouter()
 MARKDOWN_IMAGE_RE = re.compile(r"!\[.*?\]\((.*?)\)")
 HTML_VIDEO_RE = re.compile(r"<video[^>]+src=['\"](.*?)['\"]", re.IGNORECASE)
 DATA_URL_RE = re.compile(r"^data:(?P<mime>[^;]+);base64,(?P<data>.+)$", re.DOTALL)
-MEDIA_PROMPT_TOOL_BLOCK_RE = re.compile(r"<tools>.*?</tools>", re.IGNORECASE | re.DOTALL)
+MEDIA_PROMPT_TOOL_BLOCK_RE = re.compile(
+    r"<tools>.*?</tools>", re.IGNORECASE | re.DOTALL
+)
 MEDIA_SYSTEM_INSTRUCTION_MARKERS = (
     "<tools>",
     "</tools>",
     "function calling ai model",
     "function signatures",
-    "\"$schema\"",
-    "\"additionalproperties\"",
+    '"$schema"',
+    '"additionalproperties"',
 )
 MEDIA_PROMPT_PREAMBLE_PATTERNS = (
     re.compile(r"^you are a function calling ai model\.?$", re.IGNORECASE),
@@ -90,12 +100,17 @@ def set_generation_handler(handler: GenerationHandler):
 
 def _ensure_generation_handler() -> GenerationHandler:
     if generation_handler is None:
-        raise HTTPException(status_code=500, detail="Generation handler not initialized")
+        raise HTTPException(
+            status_code=500, detail="Generation handler not initialized"
+        )
     return generation_handler
 
 
 def _build_model_description(model_config: Dict[str, Any]) -> str:
     """Build a human-readable description for model listing endpoints."""
+    display_name = str(model_config.get("display_name") or "").strip()
+    if display_name:
+        return display_name
     description = f"{model_config['type'].capitalize()} generation"
     if model_config["type"] == "image":
         description += f" - {model_config['model_name']}"
@@ -112,6 +127,7 @@ def _get_openai_model_catalog() -> List[Dict[str, str]]:
             "description": _build_model_description(model_config),
         }
         for model_id, model_config in MODEL_CONFIG.items()
+        if model_config.get("listed", True)
     ]
 
 
@@ -119,10 +135,9 @@ def _get_gemini_model_catalog() -> Dict[str, str]:
     """Collect Gemini-compatible model metadata for /models endpoints."""
     catalog: Dict[str, str] = {}
 
-    for alias_id, description in get_base_model_aliases().items():
-        catalog[alias_id] = description
-
     for model_id, model_config in MODEL_CONFIG.items():
+        if not model_config.get("listed", True):
+            continue
         catalog.setdefault(model_id, _build_model_description(model_config))
 
     return catalog
@@ -202,7 +217,7 @@ async def retrieve_image_data(url: str) -> Optional[bytes]:
                     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
                     "Accept-Encoding": "gzip, deflate, br",
                     "Connection": "keep-alive",
-                    "Referer": "https://labs.google/",
+                    "Referer": "https://flow.google.com/",
                 },
                 impersonate="chrome120",
                 verify=False,
@@ -354,9 +369,7 @@ async def _append_openai_reference_images(
                         f"[CONTEXT] 图片下载失败或为空，尝试下一个: {image_url}"
                     )
                 except Exception as exc:
-                    debug_logger.log_error(
-                        f"[CONTEXT] 处理参考图时出错: {str(exc)}"
-                    )
+                    debug_logger.log_error(f"[CONTEXT] 处理参考图时出错: {str(exc)}")
     return images
 
 
@@ -367,7 +380,11 @@ async def _extract_prompt_and_images_from_gemini_contents(
         raise HTTPException(status_code=400, detail="contents cannot be empty")
 
     target_content = next(
-        (content for content in reversed(contents) if (content.role or "user") == "user"),
+        (
+            content
+            for content in reversed(contents)
+            if (content.role or "user") == "user"
+        ),
         contents[-1],
     )
 
@@ -400,8 +417,12 @@ async def _extract_prompt_and_images_from_gemini_contents(
     return prompt, images
 
 
-def _resolve_request_model(model: str, request: Any, images: Optional[List[bytes]] = None) -> str:
-    resolved_model = resolve_model_name(model=model, request=request, model_config=MODEL_CONFIG, images=images)
+def _resolve_request_model(
+    model: str, request: Any, images: Optional[List[bytes]] = None
+) -> str:
+    resolved_model = resolve_model_name(
+        model=model, request=request, model_config=MODEL_CONFIG, images=images
+    )
     if resolved_model != model:
         debug_logger.log_info(f"[ROUTE] 模型名已转换: {model} → {resolved_model}")
     return resolved_model
@@ -409,8 +430,12 @@ def _resolve_request_model(model: str, request: Any, images: Optional[List[bytes
 
 def _get_request_base_url(request: Request) -> Optional[str]:
     """根据实际请求头推导对外可访问的基础地址。"""
-    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
-    forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    forwarded_proto = (
+        (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    )
+    forwarded_host = (
+        (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    )
     host = (forwarded_host or request.headers.get("host") or "").strip()
 
     if not host:
@@ -424,9 +449,11 @@ async def _normalize_openai_request(
     request: ChatCompletionRequest,
 ) -> NormalizedGenerationRequest:
     if request.messages:
-        prompt, images, video_media_id = await _extract_prompt_and_images_from_openai_messages(
-            request.messages
-        )
+        (
+            prompt,
+            images,
+            video_media_id,
+        ) = await _extract_prompt_and_images_from_openai_messages(request.messages)
         if request.image and not images:
             images.append(await _load_image_bytes_from_uri(request.image))
         model = _resolve_request_model(request.model, request, images=images)
@@ -458,7 +485,9 @@ async def _normalize_gemini_request(
     model: str,
     request: GeminiGenerateContentRequest,
 ) -> NormalizedGenerationRequest:
-    prompt, images = await _extract_prompt_and_images_from_gemini_contents(request.contents)
+    prompt, images = await _extract_prompt_and_images_from_gemini_contents(
+        request.contents
+    )
     resolved_model = _resolve_request_model(model, request, images=images)
     system_instruction = _extract_text_from_gemini_content(request.systemInstruction)
     model_config = MODEL_CONFIG.get(resolved_model)
@@ -594,7 +623,9 @@ async def _build_image_parts_from_uri(uri: str) -> List[Dict[str, Any]]:
         mime_type, _ = _decode_data_url(uri)
         match = DATA_URL_RE.match(uri)
         if match:
-            return [{"inlineData": {"mimeType": mime_type, "data": match.group("data")}}]
+            return [
+                {"inlineData": {"mimeType": mime_type, "data": match.group("data")}}
+            ]
 
     image_bytes = await retrieve_image_data(uri)
     if image_bytes:
@@ -807,18 +838,16 @@ async def list_models(api_key: str = Depends(verify_api_key_flexible)):
 @router.get("/v1/models/aliases")
 async def list_model_aliases(api_key: str = Depends(verify_api_key_flexible)):
     """List simplified model aliases for generationConfig-based resolution."""
-    aliases = get_base_model_aliases()
-    alias_models = []
-    for alias_id, description in aliases.items():
-        alias_models.append(
-            {
-                "id": alias_id,
-                "object": "model",
-                "owned_by": "flow2api",
-                "description": description,
-                "is_alias": True,
-            }
-        )
+    alias_models = [
+        {
+            "id": alias_id,
+            "object": "model",
+            "owned_by": "flow2api",
+            "description": description,
+            "is_alias": True,
+        }
+        for alias_id, description in get_base_model_aliases().items()
+    ]
     return {"object": "list", "data": alias_models}
 
 
@@ -975,9 +1004,11 @@ async def stream_generate_content(
             content=_build_gemini_error_payload(500, str(exc)),
         )
 
+
 @router.websocket("/captcha_ws")
 async def captcha_websocket_endpoint(websocket: WebSocket):
     from ..core.logger import debug_logger
+
     api_key = (
         websocket.query_params.get("key")
         or websocket.query_params.get("api_key")

@@ -2,10 +2,12 @@
 基于 RT 的本地 reCAPTCHA 打码服务 (终极闭环版 - 无 fake_useragent 纯净版)
 支持：自动刷新 Session Token、外部触发指纹切换、死磕重试
 """
+
 import os
 import sys
 import subprocess
 import signal
+
 # 修复 Windows 上 playwright 的 asyncio 兼容性问题
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
@@ -35,18 +37,18 @@ from .browser_cookie_utils import build_cookie_signature
 def _is_running_in_docker() -> bool:
     """检测是否在 Docker 容器中运行"""
     # 方法1: 检查 /.dockerenv 文件
-    if os.path.exists('/.dockerenv'):
+    if os.path.exists("/.dockerenv"):
         return True
     # 方法2: 检查 cgroup
     try:
-        with open('/proc/1/cgroup', 'r') as f:
+        with open("/proc/1/cgroup", "r") as f:
             content = f.read()
-            if 'docker' in content or 'kubepods' in content or 'containerd' in content:
+            if "docker" in content or "kubepods" in content or "containerd" in content:
                 return True
     except:
         pass
     # 方法3: 检查环境变量
-    if os.environ.get('DOCKER_CONTAINER') or os.environ.get('KUBERNETES_SERVICE_HOST'):
+    if os.environ.get("DOCKER_CONTAINER") or os.environ.get("KUBERNETES_SERVICE_HOST"):
         return True
     return False
 
@@ -60,9 +62,8 @@ def _is_truthy_env(name: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-ALLOW_DOCKER_HEADED = (
-    _is_truthy_env("ALLOW_DOCKER_HEADED_CAPTCHA")
-    or _is_truthy_env("ALLOW_DOCKER_BROWSER_CAPTCHA")
+ALLOW_DOCKER_HEADED = _is_truthy_env("ALLOW_DOCKER_HEADED_CAPTCHA") or _is_truthy_env(
+    "ALLOW_DOCKER_BROWSER_CAPTCHA"
 )
 DOCKER_HEADED_BLOCKED = IS_DOCKER and not ALLOW_DOCKER_HEADED
 
@@ -72,9 +73,9 @@ BROWSER_ENVIRONMENT_PATCH_MARKER = "__flow2apiBrowserEnvironmentPatchInstalled__
 # ==================== playwright 自动安装 ====================
 def _run_pip_install(package: str, use_mirror: bool = False) -> bool:
     """运行 pip install 命令"""
-    cmd = [sys.executable, '-m', 'pip', 'install', package]
+    cmd = [sys.executable, "-m", "pip", "install", package]
     if use_mirror:
-        cmd.extend(['-i', 'https://pypi.tuna.tsinghua.edu.cn/simple'])
+        cmd.extend(["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"])
     
     try:
         debug_logger.log_info(f"[BrowserCaptcha] 正在安装 {package}...")
@@ -86,8 +87,12 @@ def _run_pip_install(package: str, use_mirror: bool = False) -> bool:
             print(f"[BrowserCaptcha] ✅ {package} 安装成功")
             return True
         else:
-            debug_logger.log_warning(f"[BrowserCaptcha] {package} 安装失败: {result.stderr[:200]}")
-            fail_runtime_prepare("browser", f"{package} 安装失败，请检查网络或 Python 环境。")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] {package} 安装失败: {result.stderr[:200]}"
+            )
+            fail_runtime_prepare(
+                "browser", f"{package} 安装失败，请检查网络或 Python 环境。"
+            )
             return False
     except Exception as e:
         debug_logger.log_warning(f"[BrowserCaptcha] {package} 安装异常: {e}")
@@ -97,26 +102,34 @@ def _run_pip_install(package: str, use_mirror: bool = False) -> bool:
 
 def _run_playwright_install(use_mirror: bool = False) -> bool:
     """安装 playwright chromium 浏览器"""
-    cmd = [sys.executable, '-m', 'playwright', 'install', 'chromium']
+    cmd = [sys.executable, "-m", "playwright", "install", "chromium"]
     env = os.environ.copy()
     
     if use_mirror:
         # 使用国内镜像
-        env['PLAYWRIGHT_DOWNLOAD_HOST'] = 'https://npmmirror.com/mirrors/playwright'
+        env["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://npmmirror.com/mirrors/playwright"
     
     try:
         debug_logger.log_info("[BrowserCaptcha] 正在安装 chromium 浏览器...")
         progress_runtime_prepare("browser", "正在安装 chromium 浏览器，请稍候...")
         print("[BrowserCaptcha] 正在安装 chromium 浏览器...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600, env=env
+        )
         if result.returncode == 0:
             debug_logger.log_info("[BrowserCaptcha] ✅ chromium 浏览器安装成功")
-            progress_runtime_prepare("browser", "chromium 浏览器安装成功，正在完成收尾检查...")
+            progress_runtime_prepare(
+                "browser", "chromium 浏览器安装成功，正在完成收尾检查..."
+            )
             print("[BrowserCaptcha] ✅ chromium 浏览器安装成功")
             return True
         else:
-            debug_logger.log_warning(f"[BrowserCaptcha] chromium 安装失败: {result.stderr[:200]}")
-            fail_runtime_prepare("browser", "chromium 浏览器安装失败，请稍后重试或手动安装。")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] chromium 安装失败: {result.stderr[:200]}"
+            )
+            fail_runtime_prepare(
+                "browser", "chromium 浏览器安装失败，请稍后重试或手动安装。"
+            )
             return False
     except Exception as e:
         debug_logger.log_warning(f"[BrowserCaptcha] chromium 安装异常: {e}")
@@ -128,29 +141,41 @@ def _ensure_playwright_installed() -> bool:
     """确保 playwright 已安装"""
     try:
         import playwright
+
         debug_logger.log_info("[BrowserCaptcha] playwright 已安装")
         return True
     except ImportError:
         pass
     
     debug_logger.log_info("[BrowserCaptcha] playwright 未安装，开始自动安装...")
-    progress_runtime_prepare("browser", "[BrowserCaptcha] playwright 未安装，开始自动安装...")
+    progress_runtime_prepare(
+        "browser", "[BrowserCaptcha] playwright 未安装，开始自动安装..."
+    )
     print("[BrowserCaptcha] playwright 未安装，开始自动安装...")
     
     # 先尝试官方源
-    if _run_pip_install('playwright', use_mirror=False):
+    if _run_pip_install("playwright", use_mirror=False):
         return True
     
     # 官方源失败，尝试国内镜像
     debug_logger.log_info("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
-    progress_runtime_prepare("browser", "[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
+    progress_runtime_prepare(
+        "browser", "[BrowserCaptcha] 官方源安装失败，尝试国内镜像..."
+    )
     print("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
-    if _run_pip_install('playwright', use_mirror=True):
+    if _run_pip_install("playwright", use_mirror=True):
         return True
     
-    debug_logger.log_error("[BrowserCaptcha] ❌ playwright 自动安装失败，请手动安装: pip install playwright")
-    fail_runtime_prepare("browser", "[BrowserCaptcha] ❌ playwright 自动安装失败，请手动安装: pip install playwright")
-    print("[BrowserCaptcha] ❌ playwright 自动安装失败，请手动安装: pip install playwright")
+    debug_logger.log_error(
+        "[BrowserCaptcha] ❌ playwright 自动安装失败，请手动安装: pip install playwright"
+    )
+    fail_runtime_prepare(
+        "browser",
+        "[BrowserCaptcha] ❌ playwright 自动安装失败，请手动安装: pip install playwright",
+    )
+    print(
+        "[BrowserCaptcha] ❌ playwright 自动安装失败，请手动安装: pip install playwright"
+    )
     return False
 
 
@@ -163,7 +188,10 @@ def _ensure_browser_installed() -> bool:
             "    print(p.chromium.executable_path or '')\n"
         )
         env = os.environ.copy()
-        env.setdefault("PLAYWRIGHT_BROWSERS_PATH", os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "0") or "0")
+        env.setdefault(
+            "PLAYWRIGHT_BROWSERS_PATH",
+            os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "0") or "0",
+        )
         result = subprocess.run(
             [sys.executable, "-c", detect_script],
             capture_output=True,
@@ -174,14 +202,20 @@ def _ensure_browser_installed() -> bool:
         browser_path = (result.stdout or "").strip().splitlines()
         browser_path = browser_path[-1].strip() if browser_path else ""
         if result.returncode == 0 and browser_path and os.path.exists(browser_path):
-            debug_logger.log_info(f"[BrowserCaptcha] chromium 浏览器已安装: {browser_path}")
-            finish_runtime_prepare("browser", "检测到 chromium 浏览器已安装，正在准备实例...")
+            debug_logger.log_info(
+                f"[BrowserCaptcha] chromium 浏览器已安装: {browser_path}"
+            )
+            finish_runtime_prepare(
+                "browser", "检测到 chromium 浏览器已安装，正在准备实例..."
+            )
             return True
     except Exception as e:
         debug_logger.log_info(f"[BrowserCaptcha] 检测浏览器时出错: {e}")
     
     debug_logger.log_info("[BrowserCaptcha] chromium 浏览器未安装，开始自动安装...")
-    progress_runtime_prepare("browser", "[BrowserCaptcha] chromium 浏览器未安装，开始自动安装...")
+    progress_runtime_prepare(
+        "browser", "[BrowserCaptcha] chromium 浏览器未安装，开始自动安装..."
+    )
     print("[BrowserCaptcha] chromium 浏览器未安装，开始自动安装...")
     
     # 先尝试官方源
@@ -190,14 +224,23 @@ def _ensure_browser_installed() -> bool:
     
     # 官方源失败，尝试国内镜像
     debug_logger.log_info("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
-    progress_runtime_prepare("browser", "[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
+    progress_runtime_prepare(
+        "browser", "[BrowserCaptcha] 官方源安装失败，尝试国内镜像..."
+    )
     print("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
     if _run_playwright_install(use_mirror=True):
         return True
     
-    debug_logger.log_error("[BrowserCaptcha] ❌ chromium 浏览器自动安装失败，请手动安装: python -m playwright install chromium")
-    fail_runtime_prepare("browser", "[BrowserCaptcha] ❌ chromium 浏览器自动安装失败，请手动安装: python -m playwright install chromium")
-    print("[BrowserCaptcha] ❌ chromium 浏览器自动安装失败，请手动安装: python -m playwright install chromium")
+    debug_logger.log_error(
+        "[BrowserCaptcha] ❌ chromium 浏览器自动安装失败，请手动安装: python -m playwright install chromium"
+    )
+    fail_runtime_prepare(
+        "browser",
+        "[BrowserCaptcha] ❌ chromium 浏览器自动安装失败，请手动安装: python -m playwright install chromium",
+    )
+    print(
+        "[BrowserCaptcha] ❌ chromium 浏览器自动安装失败，请手动安装: python -m playwright install chromium"
+    )
     return False
 
 
@@ -213,7 +256,9 @@ if DOCKER_HEADED_BLOCKED:
         "如需启用请设置 ALLOW_DOCKER_HEADED_CAPTCHA=true，并提供 DISPLAY/Xvfb。"
     )
     print("[BrowserCaptcha] ⚠️ 检测到 Docker 环境，默认禁用有头浏览器打码")
-    print("[BrowserCaptcha] 如需启用请设置 ALLOW_DOCKER_HEADED_CAPTCHA=true，并提供 DISPLAY/Xvfb")
+    print(
+        "[BrowserCaptcha] 如需启用请设置 ALLOW_DOCKER_HEADED_CAPTCHA=true，并提供 DISPLAY/Xvfb"
+    )
 else:
     if IS_DOCKER and ALLOW_DOCKER_HEADED:
         debug_logger.log_warning(
@@ -223,6 +268,7 @@ else:
     if _ensure_playwright_installed():
         try:
             from playwright.async_api import async_playwright, Route, BrowserContext
+
             PLAYWRIGHT_AVAILABLE = True
             # 检查并安装浏览器
             _ensure_browser_installed()
@@ -232,30 +278,37 @@ else:
 
 
 # 配置
-LABS_URL = "https://labs.google/fx/tools/flow"
+LABS_URL = "https://flow.google.com"
 BROWSER_SESSION_COOKIE_TARGET_URLS = (
-    "https://labs.google/",
+    "https://flow.google.com/",
     "https://www.google.com/",
     "https://www.recaptcha.net/",
 )
+
 
 # ==========================================
 # 代理解析工具函数
 # ==========================================
 def parse_proxy_url(proxy_url: str) -> Optional[Dict[str, str]]:
     """解析代理URL（支持 socks5h://，Playwright 中按 socks5 处理）"""
-    if not proxy_url: return None
-    if not re.match(r'^(http|https|socks5h?|socks5)://', proxy_url): proxy_url = f"http://{proxy_url}"
-    match = re.match(r'^(socks5h?|socks5|http|https)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$', proxy_url)
+    if not proxy_url:
+        return None
+    if not re.match(r"^(http|https|socks5h?|socks5)://", proxy_url):
+        proxy_url = f"http://{proxy_url}"
+    match = re.match(
+        r"^(socks5h?|socks5|http|https)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$",
+        proxy_url,
+    )
     if match:
         protocol, username, password, host, port = match.groups()
         browser_protocol = "socks5" if protocol.startswith("socks5") else protocol
-        proxy_config = {'server': f'{browser_protocol}://{host}:{port}'}
+        proxy_config = {"server": f"{browser_protocol}://{host}:{port}"}
         if username and password:
-            proxy_config['username'] = username
-            proxy_config['password'] = password
+            proxy_config["username"] = username
+            proxy_config["password"] = password
         return proxy_config
     return None
+
 
 def normalize_browser_proxy_url(proxy_url: str) -> tuple[Optional[str], Optional[str]]:
     """将浏览器代理标准化为 Playwright/Chromium 可接受的格式。
@@ -271,9 +324,12 @@ def normalize_browser_proxy_url(proxy_url: str) -> tuple[Optional[str], Optional
         return None, None
 
     proxy_url = proxy_url.strip()
-    match = re.match(r'^(socks5h?|socks5|http|https)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$', proxy_url)
+    match = re.match(
+        r"^(socks5h?|socks5|http|https)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$",
+        proxy_url,
+    )
     if not match:
-        if not re.match(r'^(http|https|socks5h?|socks5)://', proxy_url):
+        if not re.match(r"^(http|https|socks5h?|socks5)://", proxy_url):
             proxy_url = f"http://{proxy_url}"
         return proxy_url, None
 
@@ -292,18 +348,23 @@ def normalize_browser_proxy_url(proxy_url: str) -> tuple[Optional[str], Optional
 
     return proxy_url, None
 
+
 def validate_browser_proxy_url(proxy_url: str) -> tuple[bool, str]:
-    if not proxy_url: return True, None
+    if not proxy_url:
+        return True, None
     normalized_proxy_url, _ = normalize_browser_proxy_url(proxy_url.strip())
     parsed = parse_proxy_url(normalized_proxy_url)
-    if not parsed: return False, "代理格式错误"
+    if not parsed:
+        return False, "代理格式错误"
     return True, None
+
 
 class TokenBrowser:
     """简化版浏览器：每次获取 token 时启动新浏览器，用完即关
     
     每次都是新的随机 UA，避免长时间运行导致的各种问题
     """
+
     # UA pool updated on 2026-03-01 from browsers that scored >= 0.3.
     UA_LIST = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
@@ -388,21 +449,44 @@ class TokenBrowser:
     
     # 分辨率池
     RESOLUTIONS = [
-        (1920, 1080), (2560, 1440), (3840, 2160), (1366, 768), (1536, 864),
-        (1600, 900), (1280, 720), (1360, 768), (1920, 1200),
-        (1440, 900), (1680, 1050), (1280, 800), (2560, 1600),
-        (2880, 1800), (3024, 1890), (3456, 2160),
-        (1280, 1024), (1024, 768), (1400, 1050),
-        (1920, 1280), (2736, 1824), (2880, 1920), (3000, 2000),
-        (2256, 1504), (2496, 1664), (3240, 2160),
-        (3200, 1800), (2304, 1440), (1800, 1200),
+        (1920, 1080),
+        (2560, 1440),
+        (3840, 2160),
+        (1366, 768),
+        (1536, 864),
+        (1600, 900),
+        (1280, 720),
+        (1360, 768),
+        (1920, 1200),
+        (1440, 900),
+        (1680, 1050),
+        (1280, 800),
+        (2560, 1600),
+        (2880, 1800),
+        (3024, 1890),
+        (3456, 2160),
+        (1280, 1024),
+        (1024, 768),
+        (1400, 1050),
+        (1920, 1280),
+        (2736, 1824),
+        (2880, 1920),
+        (3000, 2000),
+        (2256, 1504),
+        (2496, 1664),
+        (3240, 2160),
+        (3200, 1800),
+        (2304, 1440),
+        (1800, 1200),
     ]
     
     def __init__(self, token_id: int, user_data_dir: str, db=None):
         self.token_id = token_id
         self.user_data_dir = user_data_dir
         self.db = db
-        self._semaphore = asyncio.Semaphore(1)  # Only one active solve task is allowed per slot.
+        self._semaphore = asyncio.Semaphore(
+            1
+        )  # Only one active solve task is allowed per slot.
         self._solve_count = 0
         self._error_count = 0
         self._last_fingerprint: Optional[Dict[str, Any]] = None
@@ -443,7 +527,8 @@ class TokenBrowser:
         ).hexdigest()
         self._profile_hardware_concurrency = random.choice([4, 6, 8, 8, 12, 16])
         self._profile_device_memory = random.choice([4, 8, 8, 16])
-        self._profile_gpu = random.choice([
+        self._profile_gpu = random.choice(
+            [
             {
                 "vendor": "Google Inc. (Intel)",
                 "renderer": "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)",
@@ -462,7 +547,8 @@ class TokenBrowser:
                 "unmaskedVendor": "ATI Technologies Inc.",
                 "unmaskedRenderer": "AMD Radeon(TM) Graphics",
             },
-        ])
+            ]
+        )
 
     def _build_browser_environment_patch_config(self) -> Dict[str, Any]:
         viewport = dict(self._profile_viewport or {})
@@ -470,7 +556,9 @@ class TokenBrowser:
         height = int(viewport.get("height") or 768)
         seed = str(getattr(self, "_profile_env_seed", "") or "")
         if not seed:
-            seed = hashlib.sha256(f"{self.token_id}:{width}:{height}".encode("utf-8")).hexdigest()
+            seed = hashlib.sha256(
+                f"{self.token_id}:{width}:{height}".encode("utf-8")
+            ).hexdigest()
         digest = hashlib.sha256(seed.encode("utf-8")).digest()
 
         return {
@@ -478,7 +566,9 @@ class TokenBrowser:
             "navigator": {
                 "language": "en-US",
                 "languages": ["en-US", "en"],
-                "hardwareConcurrency": int(getattr(self, "_profile_hardware_concurrency", 8) or 8),
+                "hardwareConcurrency": int(
+                    getattr(self, "_profile_hardware_concurrency", 8) or 8
+                ),
                 "deviceMemory": int(getattr(self, "_profile_device_memory", 8) or 8),
                 "maxTouchPoints": 0,
                 "pdfViewerEnabled": True,
@@ -529,25 +619,67 @@ class TokenBrowser:
                 "pixelStep": 13 + (int(digest[7]) % 11),
             },
             "audio": {
-                "floatDelta": round(((int(digest[8]) / 255.0) * 2.0 - 1.0) * 0.00003, 8),
+                "floatDelta": round(
+                    ((int(digest[8]) / 255.0) * 2.0 - 1.0) * 0.00003, 8
+                ),
                 "byteDelta": (int(digest[9]) % 5) - 2 or 1,
                 "stride": 17 + (int(digest[10]) % 13),
             },
             "mediaDevices": {
                 "devices": [
-                    {"kind": "audioinput", "deviceId": f"aid-{seed[:12]}", "groupId": f"grp-{seed[12:20]}", "label": ""},
-                    {"kind": "videoinput", "deviceId": f"vid-{seed[20:32]}", "groupId": f"grp-{seed[12:20]}", "label": ""},
-                    {"kind": "audiooutput", "deviceId": f"aod-{seed[32:44]}", "groupId": f"grp-{seed[44:52]}", "label": "Default Audio Output"},
+                    {
+                        "kind": "audioinput",
+                        "deviceId": f"aid-{seed[:12]}",
+                        "groupId": f"grp-{seed[12:20]}",
+                        "label": "",
+                    },
+                    {
+                        "kind": "videoinput",
+                        "deviceId": f"vid-{seed[20:32]}",
+                        "groupId": f"grp-{seed[12:20]}",
+                        "label": "",
+                    },
+                    {
+                        "kind": "audiooutput",
+                        "deviceId": f"aod-{seed[32:44]}",
+                        "groupId": f"grp-{seed[44:52]}",
+                        "label": "Default Audio Output",
+                    },
                 ],
             },
             "plugins": [
-                {"name": "PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format", "mimeTypes": ["application/pdf", "text/pdf"]},
-                {"name": "Chrome PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format", "mimeTypes": ["application/pdf", "text/pdf"]},
-                {"name": "Chromium PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format", "mimeTypes": ["application/pdf", "text/pdf"]},
+                {
+                    "name": "PDF Viewer",
+                    "filename": "internal-pdf-viewer",
+                    "description": "Portable Document Format",
+                    "mimeTypes": ["application/pdf", "text/pdf"],
+                },
+                {
+                    "name": "Chrome PDF Viewer",
+                    "filename": "internal-pdf-viewer",
+                    "description": "Portable Document Format",
+                    "mimeTypes": ["application/pdf", "text/pdf"],
+                },
+                {
+                    "name": "Chromium PDF Viewer",
+                    "filename": "internal-pdf-viewer",
+                    "description": "Portable Document Format",
+                    "mimeTypes": ["application/pdf", "text/pdf"],
+                },
             ],
             "mimeTypes": [
-                {"type": "application/pdf", "suffixes": "pdf", "description": "Portable Document Format", "pluginName": "PDF Viewer"},
-                {"type": "text/pdf", "suffixes": "pdf", "description": "Portable Document Format", "pluginName": "PDF Viewer"},
+                {
+                    "type": "application/pdf",
+                    "suffixes": "pdf",
+                    "description": "Portable Document Format",
+                    "pluginName": "PDF Viewer",
+                },
+                {
+                    "type": "text/pdf",
+                    "suffixes": "pdf",
+                    "description": "Portable Document Format",
+                    "pluginName": "PDF Viewer",
+                },
             ],
         }
 
@@ -557,8 +689,7 @@ class TokenBrowser:
             ensure_ascii=True,
             separators=(",", ":"),
         )
-        return (
-            r"""
+        return r"""
 (() => {
     const marker = __MARKER_JSON__;
     if (window[marker]) {
@@ -843,9 +974,8 @@ class TokenBrowser:
         }
     } catch (e) {}
 })();
-"""
-            .replace("__MARKER_JSON__", json.dumps(BROWSER_ENVIRONMENT_PATCH_MARKER))
-            .replace("__CONFIG_JSON__", config_json)
+""".replace("__MARKER_JSON__", json.dumps(BROWSER_ENVIRONMENT_PATCH_MARKER)).replace(
+            "__CONFIG_JSON__", config_json
         )
 
     async def _apply_browser_environment_patch(self, target, *, label: str) -> bool:
@@ -880,9 +1010,9 @@ class TokenBrowser:
         try:
             if not os.path.exists(self._pid_file):
                 return None
-            with open(self._pid_file, 'r', encoding='utf-8') as handle:
-                raw = (handle.read() or '').strip()
-            return int(raw or '0') or None
+            with open(self._pid_file, "r", encoding="utf-8") as handle:
+                raw = (handle.read() or "").strip()
+            return int(raw or "0") or None
         except Exception:
             return None
 
@@ -890,25 +1020,27 @@ class TokenBrowser:
         self._shared_browser_pid = pid
         try:
             if pid:
-                with open(self._pid_file, 'w', encoding='utf-8') as handle:
+                with open(self._pid_file, "w", encoding="utf-8") as handle:
                     handle.write(str(pid))
             elif os.path.exists(self._pid_file):
                 os.remove(self._pid_file)
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} failed to write PID file: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} failed to write PID file: {e}"
+            )
 
     def _is_pid_running(self, pid: Optional[int]) -> bool:
         if not pid:
             return False
         try:
-            if sys.platform.startswith('win'):
+            if sys.platform.startswith("win"):
                 result = subprocess.run(
-                    ['tasklist', '/FI', f'PID eq {pid}'],
+                    ["tasklist", "/FI", f"PID eq {pid}"],
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
-                return str(pid) in (result.stdout or '')
+                return str(pid) in (result.stdout or "")
             os.kill(pid, 0)
             return True
         except Exception:
@@ -919,30 +1051,36 @@ class TokenBrowser:
             return False
         marker = self._get_slot_marker()
         try:
-            if sys.platform.startswith('win'):
+            if sys.platform.startswith("win"):
                 result = subprocess.run(
                     [
-                        'powershell',
-                        '-NoProfile',
-                        '-Command',
-                        f'(Get-CimInstance Win32_Process -Filter "ProcessId = {pid}").CommandLine'
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        f'(Get-CimInstance Win32_Process -Filter "ProcessId = {pid}").CommandLine',
                     ],
                     capture_output=True,
                     text=True,
                     timeout=15,
                 )
-                command_line = (result.stdout or '').strip()
+                command_line = (result.stdout or "").strip()
             else:
-                cmdline_path = f'/proc/{pid}/cmdline'
+                cmdline_path = f"/proc/{pid}/cmdline"
                 if not os.path.exists(cmdline_path):
                     return False
-                with open(cmdline_path, 'rb') as handle:
-                    command_line = handle.read().decode('utf-8', errors='ignore').replace('\x00', ' ')
+                with open(cmdline_path, "rb") as handle:
+                    command_line = (
+                        handle.read()
+                        .decode("utf-8", errors="ignore")
+                        .replace("\x00", " ")
+                    )
             return marker in command_line
         except Exception:
             return False
 
-    async def _wait_pid_exit(self, pid: Optional[int], timeout_seconds: float = 5.0) -> bool:
+    async def _wait_pid_exit(
+        self, pid: Optional[int], timeout_seconds: float = 5.0
+    ) -> bool:
         if not pid:
             return True
         deadline = time.time() + timeout_seconds
@@ -959,9 +1097,9 @@ class TokenBrowser:
             debug_logger.log_warning(
                 f"[BrowserCaptcha] Token-{self.token_id} browser process is still alive; force-killing PID={pid}, reason={reason}"
             )
-            if sys.platform.startswith('win'):
+            if sys.platform.startswith("win"):
                 subprocess.run(
-                    ['taskkill', '/PID', str(pid), '/T', '/F'],
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
                     capture_output=True,
                     text=True,
                     timeout=15,
@@ -969,7 +1107,9 @@ class TokenBrowser:
             else:
                 os.kill(pid, signal.SIGKILL)
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} failed to kill PID={pid}: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} failed to kill PID={pid}: {e}"
+            )
 
     async def _cleanup_stale_slot_process(self):
         stale_pid = self._read_pid_file()
@@ -984,14 +1124,16 @@ class TokenBrowser:
             )
             self._write_pid_file(None)
             return
-        self._kill_pid(stale_pid, reason='stale_slot_process')
+        self._kill_pid(stale_pid, reason="stale_slot_process")
         await self._wait_pid_exit(stale_pid, timeout_seconds=3)
         self._write_pid_file(None)
 
     def _extract_browser_pid(self, browser) -> Optional[int]:
         candidates = [
             lambda obj: obj._impl_obj._connection._transport._proc.pid,
-            lambda obj: obj._impl_obj._connection._transport._proc.pid if obj and obj._impl_obj else None,
+            lambda obj: obj._impl_obj._connection._transport._proc.pid
+            if obj and obj._impl_obj
+            else None,
         ]
         for getter in candidates:
             try:
@@ -1041,24 +1183,30 @@ class TokenBrowser:
         return normalized if normalized > 0 else None
 
     @classmethod
-    def _build_token_session_cookie_targets(cls, session_token: str) -> List[Dict[str, Any]]:
+    def _build_token_session_cookie_targets(
+        cls, session_token: str
+    ) -> List[Dict[str, Any]]:
         normalized_value = str(session_token or "").strip()
         if not normalized_value:
             return []
 
         expanded: List[Dict[str, Any]] = []
         for target_url in BROWSER_SESSION_COOKIE_TARGET_URLS:
-            expanded.append({
+            expanded.append(
+                {
                 "name": "__Secure-next-auth.session-token",
                 "value": normalized_value,
                 "url": target_url,
                 "secure": True,
                 "httpOnly": True,
                 "sameSite": "None",
-            })
+                }
+            )
         return expanded
 
-    async def _load_token_session_binding(self, token_id: Optional[int]) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    async def _load_token_session_binding(
+        self, token_id: Optional[int]
+    ) -> tuple[Optional[int], Optional[str], Optional[str]]:
         token_key = self._normalize_token_key(token_id)
         if token_key is None or not self.db:
             return token_key, None, None
@@ -1066,20 +1214,29 @@ class TokenBrowser:
         try:
             token = await self.db.get_token(token_key)
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} 读取 token({token_key}) Session Token 失败: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} 读取 token({token_key}) Session Token 失败: {e}"
+            )
             return token_key, None, None
 
         session_token = str(getattr(token, "st", "") or "").strip() if token else ""
         if not session_token:
             return token_key, None, None
 
-        cookie_signature = build_cookie_signature(
-            f"__Secure-next-auth.session-token={session_token}"
-        ) or hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+        cookie_signature = (
+            build_cookie_signature(f"__Secure-next-auth.session-token={session_token}")
+            or hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+        )
         return token_key, session_token, cookie_signature
 
-    async def _ensure_shared_token_binding(self, context, token_id: Optional[int]) -> bool:
-        token_key, session_token, cookie_signature = await self._load_token_session_binding(token_id)
+    async def _ensure_shared_token_binding(
+        self, context, token_id: Optional[int]
+    ) -> bool:
+        (
+            token_key,
+            session_token,
+            cookie_signature,
+        ) = await self._load_token_session_binding(token_id)
 
         if token_key is None:
             self._shared_bound_token_id = None
@@ -1132,8 +1289,16 @@ class TokenBrowser:
         context_label: str = "",
     ) -> bool:
         """打开真实 Flow 页面并完成页面预热。"""
-        primary_host = "https://www.recaptcha.net" if self._browser_proxy_active else "https://www.google.com"
-        secondary_host = "https://www.google.com" if primary_host == "https://www.recaptcha.net" else "https://www.recaptcha.net"
+        primary_host = (
+            "https://www.recaptcha.net"
+            if self._browser_proxy_active
+            else "https://www.google.com"
+        )
+        secondary_host = (
+            "https://www.google.com"
+            if primary_host == "https://www.recaptcha.net"
+            else "https://www.recaptcha.net"
+        )
         page_urls = [self._build_flow_project_url(project_id), LABS_URL]
         label = f"{context_label} " if context_label else ""
 
@@ -1144,7 +1309,9 @@ class TokenBrowser:
                 debug_logger.log_info(
                     f"[BrowserCaptcha] Token-{self.token_id} {label}打开真实 Flow 页面: {target_url} (action={action})"
                 )
-                await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
+                await page.goto(
+                    target_url, wait_until="domcontentloaded", timeout=45000
+                )
                 loaded = True
                 break
             except Exception as e:
@@ -1202,7 +1369,9 @@ class TokenBrowser:
         except Exception:
             pass
 
-        warmup_seconds = float(getattr(config, "browser_flow_page_warmup_seconds", 6) or 6)
+        warmup_seconds = float(
+            getattr(config, "browser_flow_page_warmup_seconds", 6) or 6
+        )
         if warmup_seconds > 0:
             debug_logger.log_info(
                 f"[BrowserCaptcha] Token-{self.token_id} {label}真实页面预热 {warmup_seconds:.1f}s"
@@ -1229,7 +1398,9 @@ class TokenBrowser:
             pass
         return True
 
-    async def _resolve_proxy_runtime_config(self, token_proxy_url: Optional[str] = None) -> tuple:
+    async def _resolve_proxy_runtime_config(
+        self, token_proxy_url: Optional[str] = None
+    ) -> tuple:
         """Resolve runtime proxy configuration."""
         proxy_option = None
         raw_proxy_url = None
@@ -1242,14 +1413,21 @@ class TokenBrowser:
                 proxy_source = "token"
             elif self.db:
                 captcha_config = await self.db.get_captcha_config()
-                if captcha_config.browser_proxy_enabled and captcha_config.browser_proxy_url:
+                if (
+                    captcha_config.browser_proxy_enabled
+                    and captcha_config.browser_proxy_url
+                ):
                     candidate_proxy_url = captcha_config.browser_proxy_url.strip()
                     proxy_source = "global"
 
             if candidate_proxy_url:
-                normalized_proxy_url, proxy_warning = normalize_browser_proxy_url(candidate_proxy_url)
+                normalized_proxy_url, proxy_warning = normalize_browser_proxy_url(
+                    candidate_proxy_url
+                )
                 if proxy_warning:
-                    debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} {proxy_warning}")
+                    debug_logger.log_warning(
+                        f"[BrowserCaptcha] Token-{self.token_id} {proxy_warning}"
+                    )
                 proxy_option = parse_proxy_url(normalized_proxy_url)
                 if proxy_option:
                     raw_proxy_url = normalized_proxy_url
@@ -1262,11 +1440,15 @@ class TokenBrowser:
                         f"[BrowserCaptcha] Token-{self.token_id} {proxy_source} proxy format is invalid and has been ignored"
                     )
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} failed to read proxy configuration: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} failed to read proxy configuration: {e}"
+            )
 
         return proxy_option, raw_proxy_url, proxy_source
 
-    async def _create_browser(self, token_proxy_url: Optional[str] = None, manage_slot_pid: bool = True) -> tuple:
+    async def _create_browser(
+        self, token_proxy_url: Optional[str] = None, manage_slot_pid: bool = True
+    ) -> tuple:
         """Create a browser instance; shared-slot browsers track PIDs while temporary browsers do not."""
         width = self._profile_viewport["width"]
         height = self._profile_viewport["height"]
@@ -1276,8 +1458,12 @@ class TokenBrowser:
         if manage_slot_pid:
             await self._cleanup_stale_slot_process()
         playwright = await async_playwright().start()
-        browser_executable_path = os.environ.get("BROWSER_EXECUTABLE_PATH", "").strip() or None
-        proxy_option, raw_proxy_url, _ = await self._resolve_proxy_runtime_config(token_proxy_url=token_proxy_url)
+        browser_executable_path = (
+            os.environ.get("BROWSER_EXECUTABLE_PATH", "").strip() or None
+        )
+        proxy_option, raw_proxy_url, _ = await self._resolve_proxy_runtime_config(
+            token_proxy_url=token_proxy_url
+        )
 
         # 先只记录代理，真实 UA/UA-CH 交给浏览器自己暴露，避免 user-agent 与 sec-ch-ua 版本错位。
         self._last_fingerprint = {
@@ -1286,37 +1472,39 @@ class TokenBrowser:
 
         try:
             browser_args = [
-                '--disable-blink-features=AutomationControlled',
-                '--disable-quic',
-                '--disable-features=UseDnsHttpsSvcb',
-                '--lang=en-US',
-                '--no-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-setuid-sandbox',
-                '--no-first-run',
-                '--no-zygote',
-                f'--window-size={width},{height}',
-                '--disable-infobars',
-                '--hide-scrollbars',
-                '--profile-directory=Default',
-                '--disable-extensions',
-                '--disable-background-networking',
-                '--disable-sync',
-                '--disable-translate',
-                '--disable-default-apps',
-                '--no-default-browser-check',
+                "--disable-blink-features=AutomationControlled",
+                "--disable-quic",
+                "--disable-features=UseDnsHttpsSvcb",
+                "--lang=en-US",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-setuid-sandbox",
+                "--no-first-run",
+                "--no-zygote",
+                f"--window-size={width},{height}",
+                "--disable-infobars",
+                "--hide-scrollbars",
+                "--profile-directory=Default",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--disable-translate",
+                "--disable-default-apps",
+                "--no-default-browser-check",
             ]
 
             if launch_in_background:
-                browser_args.extend([
-                    '--start-minimized',
-                    '--disable-background-timer-throttling',
-                    '--disable-renderer-backgrounding',
-                    '--disable-backgrounding-occluded-windows',
-                    f'--flow2api-browser-slot={self.token_id}',
-                ])
+                browser_args.extend(
+                    [
+                        "--start-minimized",
+                        "--disable-background-timer-throttling",
+                        "--disable-renderer-backgrounding",
+                        "--disable-backgrounding-occluded-windows",
+                        f"--flow2api-browser-slot={self.token_id}",
+                    ]
+                )
                 if sys.platform.startswith("win"):
-                    browser_args.append('--window-position=-32000,-32000')
+                    browser_args.append("--window-position=-32000,-32000")
                 debug_logger.log_info(
                     f"[BrowserCaptcha] Token-{self.token_id} headed browser will launch in background mode"
                 )
@@ -1345,7 +1533,9 @@ class TokenBrowser:
             )
             return playwright, browser, context
         except Exception as e:
-            debug_logger.log_error(f"[BrowserCaptcha] Token-{self.token_id} browser launch failed: {type(e).__name__}: {str(e)[:200]}")
+            debug_logger.log_error(
+                f"[BrowserCaptcha] Token-{self.token_id} browser launch failed: {type(e).__name__}: {str(e)[:200]}"
+            )
             try:
                 if playwright:
                     await playwright.stop()
@@ -1355,14 +1545,18 @@ class TokenBrowser:
                 self._write_pid_file(None)
             raise
 
-    async def _recycle_browser_locked(self, reason: str = "unknown", rotate_profile: bool = True):
+    async def _recycle_browser_locked(
+        self, reason: str = "unknown", rotate_profile: bool = True
+    ):
         """Recycle the shared browser instance and reset its state."""
         playwright = self._shared_playwright
         browser = self._shared_browser
         context = self._shared_context
         keepalive_page = self._shared_keepalive_page
         browser_pid = self._shared_browser_pid or self._read_pid_file()
-        had_browser = bool(playwright or browser or context or keepalive_page or browser_pid)
+        had_browser = bool(
+            playwright or browser or context or keepalive_page or browser_pid
+        )
 
         self._shared_playwright = None
         self._shared_browser = None
@@ -1384,10 +1578,14 @@ class TokenBrowser:
             )
         await self._close_browser(playwright, browser, context, browser_pid=browser_pid)
 
-    async def recycle_browser(self, reason: str = "unknown", rotate_profile: bool = True):
+    async def recycle_browser(
+        self, reason: str = "unknown", rotate_profile: bool = True
+    ):
         """Recycle the current shared browser."""
         async with self._shared_browser_lock:
-            await self._recycle_browser_locked(reason=reason, rotate_profile=rotate_profile)
+            await self._recycle_browser_locked(
+                reason=reason, rotate_profile=rotate_profile
+            )
 
     async def _get_or_create_shared_browser(
         self,
@@ -1395,11 +1593,17 @@ class TokenBrowser:
         token_id: Optional[int] = None,
     ) -> tuple:
         """Get or create the shared browser for this slot."""
-        _, expected_proxy_url, _ = await self._resolve_proxy_runtime_config(token_proxy_url=token_proxy_url)
+        _, expected_proxy_url, _ = await self._resolve_proxy_runtime_config(
+            token_proxy_url=token_proxy_url
+        )
         expected_token_key = self._normalize_token_key(token_id)
 
         async with self._shared_browser_lock:
-            has_shared_browser = bool(self._shared_playwright and self._shared_browser and self._shared_context)
+            has_shared_browser = bool(
+                self._shared_playwright
+                and self._shared_browser
+                and self._shared_context
+            )
 
             if has_shared_browser:
                 is_connected = True
@@ -1411,19 +1615,22 @@ class TokenBrowser:
                     is_connected = False
 
                 if not is_connected:
-                    await self._recycle_browser_locked(reason="browser_disconnected", rotate_profile=False)
+                    await self._recycle_browser_locked(
+                        reason="browser_disconnected", rotate_profile=False
+                    )
                     has_shared_browser = False
 
             if has_shared_browser and self._shared_proxy_url != expected_proxy_url:
                 # If the proxy configuration changed, recycle the slot before reusing it.
-                await self._recycle_browser_locked(reason="proxy_changed", rotate_profile=False)
+                await self._recycle_browser_locked(
+                    reason="proxy_changed", rotate_profile=False
+                )
                 has_shared_browser = False
 
             if has_shared_browser:
                 current_bound_token = self._shared_bound_token_id
-                token_changed = (
-                    expected_token_key != current_bound_token
-                    and not (expected_token_key is None and current_bound_token is None)
+                token_changed = expected_token_key != current_bound_token and not (
+                    expected_token_key is None and current_bound_token is None
                 )
                 if token_changed:
                     await self._recycle_browser_locked(
@@ -1436,13 +1643,19 @@ class TokenBrowser:
                 try:
                     await self._ensure_shared_keepalive_page()
                 except Exception:
-                    await self._recycle_browser_locked(reason="keepalive_page_broken", rotate_profile=False)
+                    await self._recycle_browser_locked(
+                        reason="keepalive_page_broken", rotate_profile=False
+                    )
                     has_shared_browser = False
 
             if has_shared_browser:
-                binding_ok = await self._ensure_shared_token_binding(self._shared_context, token_id)
+                binding_ok = await self._ensure_shared_token_binding(
+                    self._shared_context, token_id
+                )
                 if not binding_ok:
-                    await self._recycle_browser_locked(reason="token_binding_failed", rotate_profile=False)
+                    await self._recycle_browser_locked(
+                        reason="token_binding_failed", rotate_profile=False
+                    )
                     has_shared_browser = False
 
             if has_shared_browser:
@@ -1450,9 +1663,15 @@ class TokenBrowser:
                 debug_logger.log_info(
                     f"[BrowserCaptcha] Token-{self.token_id} reusing shared browser (reuse={self._shared_reuse_count})"
                 )
-                return self._shared_playwright, self._shared_browser, self._shared_context
+                return (
+                    self._shared_playwright,
+                    self._shared_browser,
+                    self._shared_context,
+                )
 
-            playwright, browser, context = await self._create_browser(token_proxy_url=token_proxy_url)
+            playwright, browser, context = await self._create_browser(
+                token_proxy_url=token_proxy_url
+            )
             binding_ok = await self._ensure_shared_token_binding(context, token_id)
             if not binding_ok:
                 await self._close_browser(
@@ -1513,14 +1732,24 @@ class TokenBrowser:
             if self._last_fingerprint is None:
                 self._last_fingerprint = {}
 
-            for key in ("user_agent", "accept_language", "sec_ch_ua", "sec_ch_ua_mobile", "sec_ch_ua_platform"):
+            for key in (
+                "user_agent",
+                "accept_language",
+                "sec_ch_ua",
+                "sec_ch_ua_mobile",
+                "sec_ch_ua_platform",
+            ):
                 value = fingerprint.get(key)
                 if isinstance(value, str) and value:
                     self._last_fingerprint[key] = value
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} 提取浏览器指纹失败: {type(e).__name__}: {str(e)[:200]}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} 提取浏览器指纹失败: {type(e).__name__}: {str(e)[:200]}"
+            )
 
-    async def _verify_score_in_page(self, page, token: str, verify_url: str) -> Dict[str, Any]:
+    async def _verify_score_in_page(
+        self, page, token: str, verify_url: str
+    ) -> Dict[str, Any]:
         """直接读取测试页面展示的分数，避免 verify.php 与页面显示口径不一致。"""
         _ = token
         _ = verify_url
@@ -1530,7 +1759,9 @@ class TokenBrowser:
         last_snapshot: Dict[str, Any] = {}
 
         try:
-            timeout_seconds = float(getattr(config, "browser_score_dom_wait_seconds", 25) or 25)
+            timeout_seconds = float(
+                getattr(config, "browser_score_dom_wait_seconds", 25) or 25
+            )
         except Exception:
             pass
 
@@ -1590,8 +1821,10 @@ class TokenBrowser:
                             "score": score,
                             "source": result.get("source") or "antcpt_dom",
                             "raw_text": result.get("raw_text") or "",
-                            "current_user_agent": result.get("current_user_agent") or "",
-                            "current_ip_address": result.get("current_ip_address") or "",
+                            "current_user_agent": result.get("current_user_agent")
+                            or "",
+                            "current_ip_address": result.get("current_ip_address")
+                            or "",
                             "page_title": result.get("title") or "",
                             "page_url": result.get("url") or "",
                         },
@@ -1653,11 +1886,13 @@ class TokenBrowser:
         clear_slot_pid: bool = True,
     ):
         """Close a browser instance and fall back to PID cleanup if needed."""
-        is_shared_browser = any([
+        is_shared_browser = any(
+            [
             context is not None and context is self._shared_context,
             browser is not None and browser is self._shared_browser,
             playwright is not None and playwright is self._shared_playwright,
-        ])
+            ]
+        )
         effective_pid = browser_pid or self._extract_browser_pid(browser)
         if clear_slot_pid and not effective_pid:
             effective_pid = self._shared_browser_pid or self._read_pid_file()
@@ -1685,8 +1920,10 @@ class TokenBrowser:
                 await asyncio.wait_for(playwright.stop(), timeout=10)
         except Exception:
             pass
-        if effective_pid and not await self._wait_pid_exit(effective_pid, timeout_seconds=4):
-            self._kill_pid(effective_pid, reason='close_timeout_or_orphan')
+        if effective_pid and not await self._wait_pid_exit(
+            effective_pid, timeout_seconds=4
+        ):
+            self._kill_pid(effective_pid, reason="close_timeout_or_orphan")
             await self._wait_pid_exit(effective_pid, timeout_seconds=2)
         if clear_slot_pid:
             self._write_pid_file(None)
@@ -1699,7 +1936,7 @@ class TokenBrowser:
         playwright,
         browser,
         context,
-        action: str
+        action: str,
     ):
         """等待上游请求结束后再关闭浏览器（超时兜底）。"""
         close_reason = "上游请求完成"
@@ -1724,11 +1961,7 @@ class TokenBrowser:
                 self._pending_release_entries.pop(request_ref, None)
 
     async def _defer_browser_close_until_request_done(
-        self,
-        playwright,
-        browser,
-        context,
-        action: str
+        self, playwright, browser, context, action: str
     ) -> str:
         """打码成功后延迟关闭浏览器，等待 Flow 请求结束通知。"""
         flow_timeout = int(getattr(config, "flow_timeout", 300) or 300)
@@ -1765,7 +1998,9 @@ class TokenBrowser:
         )
         return request_ref
 
-    async def notify_generation_request_finished(self, request_ref: Optional[str] = None):
+    async def notify_generation_request_finished(
+        self, request_ref: Optional[str] = None
+    ):
         """通知当前 Token 对应的上游图片/视频请求已结束。"""
         async with self._pending_release_lock:
             release_event = None
@@ -1785,7 +2020,9 @@ class TokenBrowser:
                 f"(request_ref={(matched_ref or 'unknown')[:8]})"
             )
 
-    async def force_close_pending_browser(self, request_ref: Optional[str] = None, close_all: bool = False):
+    async def force_close_pending_browser(
+        self, request_ref: Optional[str] = None, close_all: bool = False
+    ):
         """Force close pending browsers tracked by this slot."""
         async with self._pending_release_lock:
             entries: List[Dict[str, Any]] = []
@@ -1800,8 +2037,12 @@ class TokenBrowser:
                 entry = self._pending_release_entries.pop(first_ref)
                 entries = [entry]
 
-        release_events = [entry.get("event") for entry in entries if isinstance(entry, dict)]
-        release_tasks = [entry.get("task") for entry in entries if isinstance(entry, dict)]
+        release_events = [
+            entry.get("event") for entry in entries if isinstance(entry, dict)
+        ]
+        release_tasks = [
+            entry.get("task") for entry in entries if isinstance(entry, dict)
+        ]
 
         for release_event in release_events:
             if not release_event:
@@ -1819,13 +2060,17 @@ class TokenBrowser:
         if close_all:
             await self.recycle_browser(reason="force_close_all", rotate_profile=False)
 
-    async def _execute_captcha(self, context, project_id: str, website_key: str, action: str) -> Optional[str]:
+    async def _execute_captcha(
+        self, context, project_id: str, website_key: str, action: str
+    ) -> Optional[str]:
         """在给定 context 中执行打码逻辑"""
         page = None
         try:
             page = await context.new_page()
             await self._apply_browser_environment_patch(page, label="captcha_page")
-            await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+            await page.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+            )
             ready = await self._prepare_flow_runtime_page(
                 page,
                 project_id,
@@ -1837,7 +2082,8 @@ class TokenBrowser:
                 return None
 
             token = await asyncio.wait_for(
-                page.evaluate(f"""
+                page.evaluate(
+                    f"""
                     (actionName) => {{
                         return new Promise((resolve, reject) => {{
                             const timeout = setTimeout(() => reject(new Error('timeout')), 25000);
@@ -1846,12 +2092,16 @@ class TokenBrowser:
                                 .catch(e => {{ clearTimeout(timeout); reject(e); }});
                         }});
                     }}
-                """, action),
-                timeout=30
+                """,
+                    action,
+                ),
+                timeout=30,
             )
 
             # 额外等待几秒，确保 enterprise 请求链路完全稳定
-            post_wait_seconds = float(getattr(config, "browser_recaptcha_settle_seconds", 3) or 3)
+            post_wait_seconds = float(
+                getattr(config, "browser_recaptcha_settle_seconds", 3) or 3
+            )
             if post_wait_seconds > 0:
                 debug_logger.log_info(
                     f"[BrowserCaptcha] Token-{self.token_id} token已获取，额外等待 {post_wait_seconds:.1f}s 后返回"
@@ -1861,7 +2111,9 @@ class TokenBrowser:
             return token
         except Exception as e:
             msg = f"{type(e).__name__}: {str(e)}"
-            debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} 打码失败: {msg[:200]}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} 打码失败: {msg[:200]}"
+            )
             return None
         finally:
             if page:
@@ -1883,19 +2135,41 @@ class TokenBrowser:
         page = None
         try:
             page = await context.new_page()
-            await self._apply_browser_environment_patch(page, label="custom_captcha_page")
-            await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+            await self._apply_browser_environment_patch(
+                page, label="custom_captcha_page"
+            )
+            await page.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+            )
 
-            primary_host = "https://www.recaptcha.net" if self._browser_proxy_active else "https://www.google.com"
-            secondary_host = "https://www.google.com" if primary_host == "https://www.recaptcha.net" else "https://www.recaptcha.net"
-            script_path = "recaptcha/enterprise.js" if enterprise else "recaptcha/api.js"
-            execute_target = "grecaptcha.enterprise.execute" if enterprise else "grecaptcha.execute"
-            ready_target = "grecaptcha.enterprise.ready" if enterprise else "grecaptcha.ready"
+            primary_host = (
+                "https://www.recaptcha.net"
+                if self._browser_proxy_active
+                else "https://www.google.com"
+            )
+            secondary_host = (
+                "https://www.google.com"
+                if primary_host == "https://www.recaptcha.net"
+                else "https://www.recaptcha.net"
+            )
+            script_path = (
+                "recaptcha/enterprise.js" if enterprise else "recaptcha/api.js"
+            )
+            execute_target = (
+                "grecaptcha.enterprise.execute" if enterprise else "grecaptcha.execute"
+            )
+            ready_target = (
+                "grecaptcha.enterprise.ready" if enterprise else "grecaptcha.ready"
+            )
             wait_expression = (
+                (
                 "typeof grecaptcha !== 'undefined' && typeof grecaptcha.enterprise !== 'undefined' && "
                 "typeof grecaptcha.enterprise.execute === 'function'"
-            ) if enterprise else (
+                )
+                if enterprise
+                else (
                 "typeof grecaptcha !== 'undefined' && typeof grecaptcha.execute === 'function'"
+            )
             )
             api_label = "enterprise.js" if enterprise else "api.js"
 
@@ -1906,7 +2180,15 @@ class TokenBrowser:
             def handle_request_failed(request):
                 try:
                     failed_url = request.url or ""
-                    if not any(d in failed_url for d in ["google.com", "gstatic.com", "recaptcha.net", "antcpt.com"]):
+                    if not any(
+                        d in failed_url
+                        for d in [
+                            "google.com",
+                            "gstatic.com",
+                            "recaptcha.net",
+                            "antcpt.com",
+                        ]
+                    ):
                         return
                     failure = request.failure or ""
                     debug_logger.log_warning(
@@ -1918,7 +2200,9 @@ class TokenBrowser:
             page.on("requestfailed", handle_request_failed)
 
             try:
-                await page.goto(website_url, wait_until="domcontentloaded", timeout=30000)
+                await page.goto(
+                    website_url, wait_until="domcontentloaded", timeout=30000
+                )
             except Exception as e:
                 debug_logger.log_warning(
                     f"[BrowserCaptcha] Token-{self.token_id} 自定义 page.goto 失败: {type(e).__name__}: {str(e)[:200]}"
@@ -1936,7 +2220,9 @@ class TokenBrowser:
                     pass
                 await asyncio.sleep(0.5)
             if not page_loaded:
-                debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} 自定义页面 readyState 未达到 complete，继续尝试预热")
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] Token-{self.token_id} 自定义页面 readyState 未达到 complete，继续尝试预热"
+                )
 
             # 模拟更自然的前台交互，避免冷启动空白上下文直接 execute。
             try:
@@ -1961,7 +2247,9 @@ class TokenBrowser:
             except Exception:
                 pass
 
-            warmup_seconds = float(getattr(config, "browser_score_test_warmup_seconds", 12) or 12)
+            warmup_seconds = float(
+                getattr(config, "browser_score_test_warmup_seconds", 12) or 12
+            )
             if warmup_seconds > 0:
                 debug_logger.log_info(
                     f"[BrowserCaptcha] Token-{self.token_id} 真实页面预热 {warmup_seconds:.1f}s 后再执行自定义打码"
@@ -1975,7 +2263,8 @@ class TokenBrowser:
                     f"[BrowserCaptcha] Token-{self.token_id} 自定义 grecaptcha 未就绪，尝试补注入脚本: {type(e).__name__}: {str(e)[:200]}"
                 )
                 try:
-                    await page.evaluate(f"""
+                    await page.evaluate(
+                        f"""
                         (primaryUrl, secondaryUrl) => {{
                             const existing = Array.from(document.scripts || []).some((script) => {{
                                 const src = script?.src || "";
@@ -1993,7 +2282,10 @@ class TokenBrowser:
                             }};
                             loadScript(0);
                         }}
-                    """, f"{primary_host}/{script_path}?render={website_key}", f"{secondary_host}/{script_path}?render={website_key}")
+                    """,
+                        f"{primary_host}/{script_path}?render={website_key}",
+                        f"{secondary_host}/{script_path}?render={website_key}",
+                    )
                     await page.wait_for_function(wait_expression, timeout=15000)
                 except Exception as inject_error:
                     debug_logger.log_warning(
@@ -2033,7 +2325,9 @@ class TokenBrowser:
                 timeout=30,
             )
 
-            post_wait_seconds = float(getattr(config, "browser_recaptcha_settle_seconds", 3) or 3)
+            post_wait_seconds = float(
+                getattr(config, "browser_recaptcha_settle_seconds", 3) or 3
+            )
             if post_wait_seconds > 0:
                 debug_logger.log_info(
                     f"[BrowserCaptcha] Token-{self.token_id} 自定义打码已完成，额外等待 {post_wait_seconds:.1f}s 后返回 token"
@@ -2041,7 +2335,9 @@ class TokenBrowser:
                 await asyncio.sleep(post_wait_seconds)
 
             if verify_url:
-                verify_payload = await self._verify_score_in_page(page, token, verify_url)
+                verify_payload = await self._verify_score_in_page(
+                    page, token, verify_url
+                )
                 return {
                     "token": token,
                     **verify_payload,
@@ -2050,7 +2346,9 @@ class TokenBrowser:
             return token
         except Exception as e:
             msg = f"{type(e).__name__}: {str(e)}"
-            debug_logger.log_warning(f"[BrowserCaptcha] Token-{self.token_id} 自定义打码失败: {msg[:200]}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} 自定义打码失败: {msg[:200]}"
+            )
             return None
         finally:
             if page:
@@ -2072,7 +2370,9 @@ class TokenBrowser:
         return max(0.0, time.monotonic() - self._last_idle_since)
 
     def has_shared_browser(self) -> bool:
-        return bool(self._shared_browser or self._shared_context or self._shared_keepalive_page)
+        return bool(
+            self._shared_browser or self._shared_context or self._shared_keepalive_page
+        )
 
     def get_last_fingerprint(self) -> Optional[Dict[str, Any]]:
         """返回最近一次打码浏览器的指纹快照。"""
@@ -2171,7 +2471,9 @@ class TokenBrowser:
         """在同一浏览器上下文中完成打码并直接提交 Flow 请求。"""
         async with self._semaphore:
             self._solve_inflight += 1
-            max_retries = max(3, int(getattr(config, "browser_captcha_max_retries", 5) or 5))
+            max_retries = max(
+                3, int(getattr(config, "browser_captcha_max_retries", 5) or 5)
+            )
 
             try:
                 for attempt in range(max_retries):
@@ -2184,7 +2486,9 @@ class TokenBrowser:
                         )
 
                         page = await context.new_page()
-                        await self._apply_browser_environment_patch(page, label="browser_submit_page")
+                        await self._apply_browser_environment_patch(
+                            page, label="browser_submit_page"
+                        )
                         await page.add_init_script(
                             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
                         )
@@ -2363,7 +2667,9 @@ class TokenBrowser:
                             token_id=token_id,
                         )
 
-                        token = await self._execute_captcha(context, project_id, website_key, action)
+                        token = await self._execute_captcha(
+                            context, project_id, website_key, action
+                        )
                         if token:
                             self._solve_count += 1
                             self._consecutive_browser_failures = 0
@@ -2378,7 +2684,10 @@ class TokenBrowser:
                             f"[BrowserCaptcha] Token-{self.token_id} token attempt {attempt + 1}/{max_retries} failed"
                         )
                         if self._consecutive_browser_failures >= 2:
-                            await self.recycle_browser(reason=f"captcha_failed_{attempt + 1}", rotate_profile=False)
+                            await self.recycle_browser(
+                                reason=f"captcha_failed_{attempt + 1}",
+                                rotate_profile=False,
+                            )
                     except Exception as e:
                         self._error_count += 1
                         self._consecutive_browser_failures += 1
@@ -2387,15 +2696,20 @@ class TokenBrowser:
                             f"[BrowserCaptcha] Token-{self.token_id} browser error: {error_message[:200]}"
                         )
                         error_lower = error_message.lower()
-                        if any(keyword in error_lower for keyword in [
+                        if any(
+                            keyword in error_lower
+                            for keyword in [
                             "context or browser has been closed",
                             "target closed",
                             "browser has been closed",
                             "connection closed",
                             "crash",
                             "closed",
-                        ]):
-                            await self.recycle_browser(reason="browser_runtime_error", rotate_profile=False)
+                            ]
+                        ):
+                            await self.recycle_browser(
+                                reason="browser_runtime_error", rotate_profile=False
+                            )
 
                     if attempt < max_retries - 1:
                         await asyncio.sleep(1)
@@ -2424,7 +2738,9 @@ class TokenBrowser:
                     context = None
                     try:
                         start_ts = time.time()
-                        playwright, browser, context = await self._create_browser(manage_slot_pid=False)
+                        playwright, browser, context = await self._create_browser(
+                            manage_slot_pid=False
+                        )
                         token = await self._execute_custom_captcha(
                             context=context,
                             website_url=website_url,
@@ -2486,7 +2802,9 @@ class TokenBrowser:
                     context = None
                     try:
                         started_at = time.time()
-                        playwright, browser, context = await self._create_browser(manage_slot_pid=False)
+                        playwright, browser, context = await self._create_browser(
+                            manage_slot_pid=False
+                        )
                         payload = await self._execute_custom_captcha(
                             context=context,
                             website_url=website_url,
@@ -2498,7 +2816,10 @@ class TokenBrowser:
 
                         if isinstance(payload, dict) and payload.get("token"):
                             self._solve_count += 1
-                            payload.setdefault("token_elapsed_ms", int((time.time() - started_at) * 1000))
+                            payload.setdefault(
+                                "token_elapsed_ms",
+                                int((time.time() - started_at) * 1000),
+                            )
                             debug_logger.log_info(
                                 f"[BrowserCaptcha] Token-{self.token_id} in-page score verification succeeded ({(time.time()-started_at)*1000:.0f}ms)"
                             )
@@ -2530,7 +2851,7 @@ class TokenBrowser:
                     "verify_mode": "browser_page",
                     "verify_elapsed_ms": 0,
                     "verify_http_status": None,
-                    "verify_result": {}
+                    "verify_result": {},
                 }
             finally:
                 self._solve_inflight = max(0, self._solve_inflight - 1)
@@ -2543,7 +2864,7 @@ class BrowserCaptchaService:
     支持配置浏览器数量，每个浏览器只开 1 个标签页，请求轮询分配
     """
     
-    _instance: Optional['BrowserCaptchaService'] = None
+    _instance: Optional["BrowserCaptchaService"] = None
     _lock = asyncio.Lock()
     
     def __init__(self, db=None):
@@ -2559,12 +2880,7 @@ class BrowserCaptchaService:
         self._browser_count = 1  # ?? 1 ?????????
         self._round_robin_index = 0  # ????
         # ????
-        self._stats = {
-            "req_total": 0,
-            "gen_ok": 0,
-            "gen_fail": 0,
-            "api_403": 0
-        }
+        self._stats = {"req_total": 0, "gen_ok": 0, "gen_fail": 0, "api_403": 0}
         
         # ?????? _load_browser_count ???????
         self._token_semaphore = None
@@ -2590,16 +2906,22 @@ class BrowserCaptchaService:
                             continue
                         if browser.idle_seconds() < idle_ttl:
                             continue
-                        await browser.recycle_browser(reason=f"idle_ttl_{idle_ttl}s", rotate_profile=False)
+                        await browser.recycle_browser(
+                            reason=f"idle_ttl_{idle_ttl}s", rotate_profile=False
+                        )
                     except Exception as e:
-                        debug_logger.log_warning(f"[BrowserCaptcha] idle reaper failed: {e}")
+                        debug_logger.log_warning(
+                            f"[BrowserCaptcha] idle reaper failed: {e}"
+                        )
             except asyncio.CancelledError:
                 return
             except Exception as e:
-                debug_logger.log_warning(f"[BrowserCaptcha] idle reaper loop error: {e}")
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] idle reaper loop error: {e}"
+                )
 
     @classmethod
-    async def get_instance(cls, db=None) -> 'BrowserCaptchaService':
+    async def get_instance(cls, db=None) -> "BrowserCaptchaService":
         if cls._instance is None:
             async with cls._lock:
                 if cls._instance is None:
@@ -2633,9 +2955,13 @@ class BrowserCaptchaService:
             try:
                 captcha_config = await self.db.get_captcha_config()
                 self._browser_count = max(1, captcha_config.browser_count)
-                debug_logger.log_info(f"[BrowserCaptcha] 浏览器数量配置: {self._browser_count}")
+                debug_logger.log_info(
+                    f"[BrowserCaptcha] 浏览器数量配置: {self._browser_count}"
+                )
             except Exception as e:
-                debug_logger.log_warning(f"[BrowserCaptcha] 加载 browser_count 配置失败: {e}，使用默认值 1")
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] 加载 browser_count 配置失败: {e}，使用默认值 1"
+                )
                 self._browser_count = 1
         # 并发限制 = 浏览器数量，不再硬编码限制
         self._token_semaphore = asyncio.Semaphore(self._browser_count)
@@ -2653,12 +2979,16 @@ class BrowserCaptchaService:
                 for browser_id in list(self._browsers.keys()):
                     if browser_id >= self._browser_count:
                         browsers_to_close.append(self._browsers.pop(browser_id))
-                        debug_logger.log_info(f"[BrowserCaptcha] ????????? {browser_id}")
+                        debug_logger.log_info(
+                            f"[BrowserCaptcha] ????????? {browser_id}"
+                        )
 
         for browser in browsers_to_close:
             try:
                 await browser.force_close_pending_browser(close_all=True)
-                await browser.recycle_browser(reason="browser_slot_removed", rotate_profile=False)
+                await browser.recycle_browser(
+                    reason="browser_slot_removed", rotate_profile=False
+                )
             except Exception as e:
                 debug_logger.log_warning(f"[BrowserCaptcha] ???????????: {e}")
 
@@ -2684,21 +3014,26 @@ class BrowserCaptchaService:
         gen_ok = self._stats["gen_ok"]
         
         valid_success = gen_ok - api_403
-        if valid_success < 0: valid_success = 0
+        if valid_success < 0:
+            valid_success = 0
         
         rate = (valid_success / total * 100) if total > 0 else 0.0
 
-    
     async def _warmup_browser_slot(self, browser_id: int):
         browser = await self._get_or_create_browser(browser_id)
         try:
             await browser._get_or_create_shared_browser()
             debug_logger.log_info(f"[BrowserCaptcha] warmed browser slot {browser_id}")
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] warmup for slot {browser_id} failed: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] warmup for slot {browser_id} failed: {e}"
+            )
 
     async def warmup_browser_slots(self):
-        tasks = [self._warmup_browser_slot(browser_id) for browser_id in range(self._browser_count)]
+        tasks = [
+            self._warmup_browser_slot(browser_id)
+            for browser_id in range(self._browser_count)
+        ]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -2706,11 +3041,11 @@ class BrowserCaptchaService:
         if self._slot_reservations.get(slot_id, 0) > 0:
             return True
         browser = self._browsers.get(slot_id)
-        return bool(browser and getattr(browser, 'is_busy', lambda: False)())
+        return bool(browser and getattr(browser, "is_busy", lambda: False)())
 
     def _has_warmed_browser_for_allocation(self, slot_id: int) -> bool:
         browser = self._browsers.get(slot_id)
-        return bool(browser and getattr(browser, 'has_shared_browser', lambda: False)())
+        return bool(browser and getattr(browser, "has_shared_browser", lambda: False)())
 
     def _reserve_slot_locked(self, slot_id: int):
         self._slot_reservations[slot_id] = self._slot_reservations.get(slot_id, 0) + 1
@@ -2740,11 +3075,16 @@ class BrowserCaptchaService:
 
                     if idle_slot is None:
                         idle_slot = slot_id
-                    if warmed_idle_slot is None and self._has_warmed_browser_for_allocation(slot_id):
+                    if (
+                        warmed_idle_slot is None
+                        and self._has_warmed_browser_for_allocation(slot_id)
+                    ):
                         warmed_idle_slot = slot_id
                         break
 
-                selected_slot = warmed_idle_slot if warmed_idle_slot is not None else idle_slot
+                selected_slot = (
+                    warmed_idle_slot if warmed_idle_slot is not None else idle_slot
+                )
                 if selected_slot is not None:
                     self._round_robin_index = (selected_slot + 1) % self._browser_count
                     self._reserve_slot_locked(selected_slot)
@@ -2758,7 +3098,9 @@ class BrowserCaptchaService:
         """获取或创建指定 ID 的浏览器实例"""
         async with self._browsers_lock:
             if browser_id not in self._browsers:
-                user_data_dir = os.path.join(self.base_user_data_dir, f"browser_{browser_id}")
+                user_data_dir = os.path.join(
+                    self.base_user_data_dir, f"browser_{browser_id}"
+                )
                 browser = TokenBrowser(browser_id, user_data_dir, db=self.db)
                 self._browsers[browser_id] = browser
                 debug_logger.log_info(f"[BrowserCaptcha] 创建浏览器实例 {browser_id}")
@@ -2771,14 +3113,18 @@ class BrowserCaptchaService:
         return browser_id
 
     @staticmethod
-    def _compose_browser_ref(browser_id: int, request_ref: Optional[str]) -> Union[int, str]:
+    def _compose_browser_ref(
+        browser_id: int, request_ref: Optional[str]
+    ) -> Union[int, str]:
         """将 browser_id 与 request_ref 合并为可回传的请求句柄。"""
         if request_ref:
             return f"{browser_id}:{request_ref}"
         return browser_id
 
     @staticmethod
-    def _parse_browser_ref(browser_ref: Optional[Union[int, str]]) -> tuple[Optional[int], Optional[str]]:
+    def _parse_browser_ref(
+        browser_ref: Optional[Union[int, str]],
+    ) -> tuple[Optional[int], Optional[str]]:
         """解析请求句柄，兼容旧的纯 int browser_id。"""
         if browser_ref is None:
             return None, None
@@ -2805,10 +3151,14 @@ class BrowserCaptchaService:
             if token and token.captcha_proxy_url and token.captcha_proxy_url.strip():
                 return token.captcha_proxy_url.strip()
         except Exception as e:
-            debug_logger.log_warning(f"[BrowserCaptcha] 读取 token({token_id}) 打码代理失败: {e}")
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 读取 token({token_id}) 打码代理失败: {e}"
+            )
         return None
     
-    async def get_token(self, project_id: str, action: str = "IMAGE_GENERATION", token_id: int = None) -> tuple[Optional[str], Union[int, str]]:
+    async def get_token(
+        self, project_id: str, action: str = "IMAGE_GENERATION", token_id: int = None
+    ) -> tuple[Optional[str], Union[int, str]]:
         """获取 reCAPTCHA Token（从共享浏览器池选择 slot）
         
         Args:
@@ -2940,7 +3290,9 @@ class BrowserCaptchaService:
         )
         return payload, browser_id
 
-    async def get_fingerprint(self, browser_ref: Optional[Union[int, str]]) -> Optional[Dict[str, Any]]:
+    async def get_fingerprint(
+        self, browser_ref: Optional[Union[int, str]]
+    ) -> Optional[Dict[str, Any]]:
         """获取指定浏览器最近一次打码时的指纹快照。"""
         browser_id, _ = self._parse_browser_ref(browser_ref)
         if browser_id is None:
@@ -2981,11 +3333,19 @@ class BrowserCaptchaService:
                 token_id=token_id,
             )
             fingerprint = browser.get_last_fingerprint()
-            return response_payload, self._compose_browser_ref(browser_id, None), fingerprint
+            return (
+                response_payload,
+                self._compose_browser_ref(browser_id, None),
+                fingerprint,
+            )
         finally:
             await self._release_slot_reservation(browser_id)
 
-    async def report_error(self, browser_ref: Optional[Union[int, str]] = None, error_reason: Optional[str] = None):
+    async def report_error(
+        self,
+        browser_ref: Optional[Union[int, str]] = None,
+        error_reason: Optional[str] = None,
+    ):
         """Handle upstream errors; recycle the browser only for explicit reCAPTCHA evaluation failures."""
         browser_id, _ = self._parse_browser_ref(browser_ref)
 
@@ -2995,7 +3355,8 @@ class BrowserCaptchaService:
             has_recaptcha = "recaptcha" in error_lower
             should_recycle = has_recaptcha and (
                 "evaluation failed" in error_lower
-                or "verification failed" in error_lower or "验证失败" in (error_reason or "")
+                or "verification failed" in error_lower
+                or "验证失败" in (error_reason or "")
                 or "failed" in error_lower
             )
             if should_recycle:
@@ -3012,9 +3373,13 @@ class BrowserCaptchaService:
                     rotate_profile=True,
                 )
             except Exception as e:
-                debug_logger.log_warning(f"[BrowserCaptcha] browser {browser_id} recycle failed: {e}")
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] browser {browser_id} recycle failed: {e}"
+                )
 
-    async def report_request_finished(self, browser_ref: Optional[Union[int, str]] = None):
+    async def report_request_finished(
+        self, browser_ref: Optional[Union[int, str]] = None
+    ):
         """上层通知本次请求已完成；browser 模式仅保留常驻浏览器，不在成功后主动关闭。"""
         browser_id, _ = self._parse_browser_ref(browser_ref)
         if browser_id is None:
@@ -3025,9 +3390,11 @@ class BrowserCaptchaService:
 
         if browser:
             keepalive_alive = False
-            keepalive_page = getattr(browser, '_shared_keepalive_page', None)
+            keepalive_page = getattr(browser, "_shared_keepalive_page", None)
             try:
-                keepalive_alive = bool(keepalive_page and not keepalive_page.is_closed())
+                keepalive_alive = bool(
+                    keepalive_page and not keepalive_page.is_closed()
+                )
             except Exception:
                 keepalive_alive = False
             debug_logger.log_info(
@@ -3054,16 +3421,28 @@ class BrowserCaptchaService:
         for browser in browsers:
             try:
                 await browser.force_close_pending_browser(close_all=True)
-                await browser.recycle_browser(reason="service_shutdown", rotate_profile=False)
+                await browser.recycle_browser(
+                    reason="service_shutdown", rotate_profile=False
+                )
             except Exception:
                 pass
             
-    async def open_login_browser(self): return {"success": False, "error": "Not implemented"}
-    async def create_browser_for_token(self, t, s=None): pass
+    async def open_login_browser(self):
+        return {"success": False, "error": "Not implemented"}
+
+    async def create_browser_for_token(self, t, s=None):
+        pass
+
     def get_stats(self): 
         browsers = list(self._browsers.values())
-        busy_browser_count = sum(1 for browser in browsers if getattr(browser, "is_busy", lambda: False)())
-        shared_browser_count = sum(1 for browser in browsers if getattr(browser, "has_shared_browser", lambda: False)())
+        busy_browser_count = sum(
+            1 for browser in browsers if getattr(browser, "is_busy", lambda: False)()
+        )
+        shared_browser_count = sum(
+            1
+            for browser in browsers
+            if getattr(browser, "has_shared_browser", lambda: False)()
+        )
         base_stats = {
             "total_solve_count": self._stats["gen_ok"],
             "total_error_count": self._stats["gen_fail"],
@@ -3074,7 +3453,6 @@ class BrowserCaptchaService:
             "idle_browser_count": max(self._browser_count - busy_browser_count, 0),
             "shared_browser_count": shared_browser_count,
             "project_affinity_count": 0,
-            "browsers": []
+            "browsers": [],
         }
         return base_stats
-

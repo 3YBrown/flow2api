@@ -1,4 +1,5 @@
 """Database storage layer for Flow2API"""
+
 import asyncio
 import aiosqlite
 import json
@@ -7,7 +8,22 @@ from datetime import date, datetime
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from .config import DEFAULT_YESCAPTCHA_TASK_TYPE, normalize_yescaptcha_task_type
-from .models import Token, TokenStats, Task, RequestLog, AdminConfig, ProxyConfig, GenerationConfig, CacheConfig, Project, CaptchaConfig, PluginConfig, CallLogicConfig, TokenRefreshConfig
+from .models import (
+    Token,
+    TokenStats,
+    Task,
+    RequestLog,
+    AdminConfig,
+    ProxyConfig,
+    GenerationConfig,
+    CacheConfig,
+    Project,
+    CaptchaConfig,
+    DebugConfig,
+    PluginConfig,
+    CallLogicConfig,
+    TokenRefreshConfig,
+)
 
 
 class Database:
@@ -42,7 +58,9 @@ class Database:
         """Open a configured SQLite connection and optionally serialize writes."""
         if write:
             async with self._write_lock:
-                async with aiosqlite.connect(self.db_path, timeout=self._connect_timeout) as db:
+                async with aiosqlite.connect(
+                    self.db_path, timeout=self._connect_timeout
+                ) as db:
                     await self._configure_connection(db)
                     yield db
             return
@@ -55,7 +73,7 @@ class Database:
         """Check if a table exists in the database"""
         cursor = await db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table_name,)
+            (table_name,),
         )
         result = await cursor.fetchone()
         return result is not None
@@ -95,10 +113,13 @@ class Database:
                 admin_config = config_dict.get("admin", {})
                 error_ban_threshold = admin_config.get("error_ban_threshold", 3)
 
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT INTO admin_config (id, username, password, api_key, error_ban_threshold)
                 VALUES (1, ?, ?, ?, ?)
-            """, (admin_username, admin_password, api_key, error_ban_threshold))
+            """,
+                (admin_username, admin_password, api_key, error_ban_threshold),
+            )
 
         # Ensure proxy_config has a row
         cursor = await db.execute("SELECT COUNT(*) FROM proxy_config")
@@ -116,18 +137,20 @@ class Database:
                 proxy_url = proxy_url if proxy_url else None
                 media_proxy_enabled = proxy_config.get(
                     "media_proxy_enabled",
-                    proxy_config.get("image_io_proxy_enabled", False)
+                    proxy_config.get("image_io_proxy_enabled", False),
                 )
                 media_proxy_url = proxy_config.get(
-                    "media_proxy_url",
-                    proxy_config.get("image_io_proxy_url", "")
+                    "media_proxy_url", proxy_config.get("image_io_proxy_url", "")
                 )
                 media_proxy_url = media_proxy_url if media_proxy_url else None
 
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT INTO proxy_config (id, enabled, proxy_url, media_proxy_enabled, media_proxy_url)
                 VALUES (1, ?, ?, ?, ?)
-            """, (proxy_enabled, proxy_url, media_proxy_enabled, media_proxy_url))
+            """,
+                (proxy_enabled, proxy_url, media_proxy_enabled, media_proxy_url),
+            )
 
         # Ensure generation_config has a row
         cursor = await db.execute("SELECT COUNT(*) FROM generation_config")
@@ -149,10 +172,13 @@ class Database:
             except Exception:
                 max_retries = 3
 
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT INTO generation_config (id, image_timeout, video_timeout, max_retries)
                 VALUES (1, ?, ?, ?)
-            """, (image_timeout, video_timeout, max_retries))
+            """,
+                (image_timeout, video_timeout, max_retries),
+            )
 
         # Ensure call_logic_config has a row
         cursor = await db.execute("SELECT COUNT(*) FROM call_logic_config")
@@ -165,15 +191,20 @@ class Database:
                 call_logic_config = config_dict.get("call_logic", {})
                 call_mode = call_logic_config.get("call_mode", "default")
                 if call_mode not in ("default", "polling"):
-                    polling_mode_enabled = call_logic_config.get("polling_mode_enabled", False)
+                    polling_mode_enabled = call_logic_config.get(
+                        "polling_mode_enabled", False
+                    )
                     call_mode = "polling" if polling_mode_enabled else "default"
                 else:
                     polling_mode_enabled = call_mode == "polling"
 
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT INTO call_logic_config (id, call_mode, polling_mode_enabled)
                 VALUES (1, ?, ?)
-            """, (call_mode, polling_mode_enabled))
+            """,
+                (call_mode, polling_mode_enabled),
+            )
 
         # Ensure cache_config has a row
         cursor = await db.execute("SELECT COUNT(*) FROM cache_config")
@@ -191,10 +222,13 @@ class Database:
                 # Convert empty string to None
                 cache_base_url = cache_base_url if cache_base_url else None
 
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT INTO cache_config (id, cache_enabled, cache_timeout, cache_base_url)
                 VALUES (1, ?, ?, ?)
-            """, (cache_enabled, cache_timeout, cache_base_url))
+            """,
+                (cache_enabled, cache_timeout, cache_base_url),
+            )
 
         # Ensure debug_config has a row
         cursor = await db.execute("SELECT COUNT(*) FROM debug_config")
@@ -212,16 +246,19 @@ class Database:
                 log_responses = debug_config.get("log_responses", True)
                 mask_token = debug_config.get("mask_token", True)
 
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT INTO debug_config (id, enabled, log_requests, log_responses, mask_token)
                 VALUES (1, ?, ?, ?, ?)
-            """, (debug_enabled, log_requests, log_responses, mask_token))
+            """,
+                (debug_enabled, log_requests, log_responses, mask_token),
+            )
 
         # Ensure captcha_config has a row
         cursor = await db.execute("SELECT COUNT(*) FROM captcha_config")
         count = await cursor.fetchone()
         if count[0] == 0:
-            captcha_method = "browser"
+            captcha_method = "yescaptcha"
             yescaptcha_api_key = ""
             yescaptcha_base_url = "https://api.yescaptcha.com"
             yescaptcha_task_type = DEFAULT_YESCAPTCHA_TASK_TYPE
@@ -236,18 +273,36 @@ class Database:
 
             if config_dict:
                 captcha_config = config_dict.get("captcha", {})
-                captcha_method = captcha_config.get("captcha_method", "browser")
+                captcha_method = captcha_config.get("captcha_method", "yescaptcha")
                 yescaptcha_api_key = captcha_config.get("yescaptcha_api_key", "")
-                yescaptcha_base_url = captcha_config.get("yescaptcha_base_url", "https://api.yescaptcha.com")
-                yescaptcha_task_type = normalize_yescaptcha_task_type(captcha_config.get("yescaptcha_task_type"))
-                remote_browser_base_url = captcha_config.get("remote_browser_base_url", "")
-                remote_browser_api_key = captcha_config.get("remote_browser_api_key", "")
-                remote_browser_timeout = captcha_config.get("remote_browser_timeout", 60)
+                yescaptcha_base_url = captcha_config.get(
+                    "yescaptcha_base_url", "https://api.yescaptcha.com"
+                )
+                yescaptcha_task_type = normalize_yescaptcha_task_type(
+                    captcha_config.get("yescaptcha_task_type")
+                )
+                remote_browser_base_url = captcha_config.get(
+                    "remote_browser_base_url", ""
+                )
+                remote_browser_api_key = captcha_config.get(
+                    "remote_browser_api_key", ""
+                )
+                remote_browser_timeout = captcha_config.get(
+                    "remote_browser_timeout", 60
+                )
                 browser_count = captcha_config.get("browser_count", 1)
-                personal_project_pool_size = captcha_config.get("personal_project_pool_size", 4)
-                personal_max_resident_tabs = captcha_config.get("personal_max_resident_tabs", 5)
-                browser_personal_fresh_restart_every_n_solves = captcha_config.get("browser_personal_fresh_restart_every_n_solves", 10)
-                personal_idle_tab_ttl_seconds = captcha_config.get("personal_idle_tab_ttl_seconds", 600)
+                personal_project_pool_size = captcha_config.get(
+                    "personal_project_pool_size", 4
+                )
+                personal_max_resident_tabs = captcha_config.get(
+                    "personal_max_resident_tabs", 5
+                )
+                browser_personal_fresh_restart_every_n_solves = captcha_config.get(
+                    "browser_personal_fresh_restart_every_n_solves", 10
+                )
+                personal_idle_tab_ttl_seconds = captcha_config.get(
+                    "personal_idle_tab_ttl_seconds", 600
+                )
             try:
                 remote_browser_timeout = max(5, int(remote_browser_timeout))
             except Exception:
@@ -257,23 +312,32 @@ class Database:
             except Exception:
                 browser_count = 1
             try:
-                personal_project_pool_size = max(1, min(50, int(personal_project_pool_size)))
+                personal_project_pool_size = max(
+                    1, min(50, int(personal_project_pool_size))
+                )
             except Exception:
                 personal_project_pool_size = 4
             try:
-                personal_max_resident_tabs = max(1, min(50, int(personal_max_resident_tabs)))
+                personal_max_resident_tabs = max(
+                    1, min(50, int(personal_max_resident_tabs))
+                )
             except Exception:
                 personal_max_resident_tabs = 5
             try:
-                browser_personal_fresh_restart_every_n_solves = max(0, int(browser_personal_fresh_restart_every_n_solves))
+                browser_personal_fresh_restart_every_n_solves = max(
+                    0, int(browser_personal_fresh_restart_every_n_solves)
+                )
             except Exception:
                 browser_personal_fresh_restart_every_n_solves = 10
             try:
-                personal_idle_tab_ttl_seconds = max(60, int(personal_idle_tab_ttl_seconds))
+                personal_idle_tab_ttl_seconds = max(
+                    60, int(personal_idle_tab_ttl_seconds)
+                )
             except Exception:
                 personal_idle_tab_ttl_seconds = 600
 
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT INTO captcha_config (
                     id, captcha_method, yescaptcha_api_key, yescaptcha_base_url,
                     yescaptcha_task_type,
@@ -283,7 +347,8 @@ class Database:
                     personal_idle_tab_ttl_seconds
                 )
                 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
+            """,
+                (
                 captcha_method,
                 yescaptcha_api_key,
                 yescaptcha_base_url,
@@ -296,7 +361,8 @@ class Database:
                 personal_max_resident_tabs,
                 browser_personal_fresh_restart_every_n_solves,
                 personal_idle_tab_ttl_seconds,
-            ))
+                ),
+            )
 
         # Ensure plugin_config has a row
         cursor = await db.execute("SELECT COUNT(*) FROM plugin_config")
@@ -381,7 +447,7 @@ class Database:
                 await db.execute("""
                     CREATE TABLE captcha_config (
                         id INTEGER PRIMARY KEY DEFAULT 1,
-                        captcha_method TEXT DEFAULT 'browser',
+                        captcha_method TEXT DEFAULT 'yescaptcha',
                         yescaptcha_api_key TEXT DEFAULT '',
                         yescaptcha_base_url TEXT DEFAULT 'https://api.yescaptcha.com',
                         yescaptcha_task_type TEXT DEFAULT 'RecaptchaV3TaskProxylessM1S9',
@@ -391,6 +457,8 @@ class Database:
                         ezcaptcha_base_url TEXT DEFAULT 'https://api.ez-captcha.com',
                         capsolver_api_key TEXT DEFAULT '',
                         capsolver_base_url TEXT DEFAULT 'https://api.capsolver.com',
+                        captcharun_api_key TEXT DEFAULT '',
+                        captcharun_base_url TEXT DEFAULT 'https://api.captcha-run.com',
                         remote_browser_base_url TEXT DEFAULT '',
                         remote_browser_api_key TEXT DEFAULT '',
                         remote_browser_timeout INTEGER DEFAULT 60,
@@ -464,17 +532,25 @@ class Database:
                 for col_name, col_type in columns_to_add:
                     if not await self._column_exists(db, "tokens", col_name):
                         try:
-                            await db.execute(f"ALTER TABLE tokens ADD COLUMN {col_name} {col_type}")
+                            await db.execute(
+                                f"ALTER TABLE tokens ADD COLUMN {col_name} {col_type}"
+                            )
                             print(f"  ✓ Added column '{col_name}' to tokens table")
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
 
             # Check and add missing columns to admin_config table
             if await self._table_exists(db, "admin_config"):
-                if not await self._column_exists(db, "admin_config", "error_ban_threshold"):
+                if not await self._column_exists(
+                    db, "admin_config", "error_ban_threshold"
+                ):
                     try:
-                        await db.execute("ALTER TABLE admin_config ADD COLUMN error_ban_threshold INTEGER DEFAULT 3")
-                        print("  ✓ Added column 'error_ban_threshold' to admin_config table")
+                        await db.execute(
+                            "ALTER TABLE admin_config ADD COLUMN error_ban_threshold INTEGER DEFAULT 3"
+                        )
+                        print(
+                            "  ✓ Added column 'error_ban_threshold' to admin_config table"
+                        )
                     except Exception as e:
                         print(f"  ✗ Failed to add column 'error_ban_threshold': {e}")
 
@@ -488,8 +564,12 @@ class Database:
                 for col_name, col_type in proxy_columns_to_add:
                     if not await self._column_exists(db, "proxy_config", col_name):
                         try:
-                            await db.execute(f"ALTER TABLE proxy_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to proxy_config table")
+                            await db.execute(
+                                f"ALTER TABLE proxy_config ADD COLUMN {col_name} {col_type}"
+                            )
+                            print(
+                                f"  ✓ Added column '{col_name}' to proxy_config table"
+                            )
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
 
@@ -502,8 +582,12 @@ class Database:
                 for col_name, col_type in generation_columns_to_add:
                     if not await self._column_exists(db, "generation_config", col_name):
                         try:
-                            await db.execute(f"ALTER TABLE generation_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to generation_config table")
+                            await db.execute(
+                                f"ALTER TABLE generation_config ADD COLUMN {col_name} {col_type}"
+                            )
+                            print(
+                                f"  ✓ Added column '{col_name}' to generation_config table"
+                            )
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
 
@@ -512,13 +596,24 @@ class Database:
                 captcha_columns_to_add = [
                     ("browser_proxy_enabled", "BOOLEAN DEFAULT 0"),
                     ("browser_proxy_url", "TEXT"),
-                    ("yescaptcha_task_type", "TEXT DEFAULT 'RecaptchaV3TaskProxylessM1S9'"),
+                    (
+                        "yescaptcha_task_type",
+                        "TEXT DEFAULT 'RecaptchaV3TaskProxylessM1S9'",
+                    ),
                     ("capmonster_api_key", "TEXT DEFAULT ''"),
-                    ("capmonster_base_url", "TEXT DEFAULT 'https://api.capmonster.cloud'"),
+                    (
+                        "capmonster_base_url",
+                        "TEXT DEFAULT 'https://api.capmonster.cloud'",
+                    ),
                     ("ezcaptcha_api_key", "TEXT DEFAULT ''"),
                     ("ezcaptcha_base_url", "TEXT DEFAULT 'https://api.ez-captcha.com'"),
                     ("capsolver_api_key", "TEXT DEFAULT ''"),
                     ("capsolver_base_url", "TEXT DEFAULT 'https://api.capsolver.com'"),
+                    ("captcharun_api_key", "TEXT DEFAULT ''"),
+                    (
+                        "captcharun_base_url",
+                        "TEXT DEFAULT 'https://api.captcha-run.com'",
+                    ),
                     ("browser_count", "INTEGER DEFAULT 1"),
                     ("remote_browser_base_url", "TEXT DEFAULT ''"),
                     ("remote_browser_api_key", "TEXT DEFAULT ''"),
@@ -528,8 +623,12 @@ class Database:
                 for col_name, col_type in captcha_columns_to_add:
                     if not await self._column_exists(db, "captcha_config", col_name):
                         try:
-                            await db.execute(f"ALTER TABLE captcha_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to captcha_config table")
+                            await db.execute(
+                                f"ALTER TABLE captcha_config ADD COLUMN {col_name} {col_type}"
+                            )
+                            print(
+                                f"  ✓ Added column '{col_name}' to captcha_config table"
+                            )
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
 
@@ -546,7 +645,9 @@ class Database:
                 for col_name, col_type in stats_columns_to_add:
                     if not await self._column_exists(db, "token_stats", col_name):
                         try:
-                            await db.execute(f"ALTER TABLE token_stats ADD COLUMN {col_name} {col_type}")
+                            await db.execute(
+                                f"ALTER TABLE token_stats ADD COLUMN {col_name} {col_type}"
+                            )
                             print(f"  ✓ Added column '{col_name}' to token_stats table")
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
@@ -560,8 +661,12 @@ class Database:
                 for col_name, col_type in plugin_columns_to_add:
                     if not await self._column_exists(db, "plugin_config", col_name):
                         try:
-                            await db.execute(f"ALTER TABLE plugin_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to plugin_config table")
+                            await db.execute(
+                                f"ALTER TABLE plugin_config ADD COLUMN {col_name} {col_type}"
+                            )
+                            print(
+                                f"  ✓ Added column '{col_name}' to plugin_config table"
+                            )
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
 
@@ -573,10 +678,16 @@ class Database:
                 ]
 
                 for col_name, col_type in token_refresh_columns_to_add:
-                    if not await self._column_exists(db, "token_refresh_config", col_name):
+                    if not await self._column_exists(
+                        db, "token_refresh_config", col_name
+                    ):
                         try:
-                            await db.execute(f"ALTER TABLE token_refresh_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to token_refresh_config table")
+                            await db.execute(
+                                f"ALTER TABLE token_refresh_config ADD COLUMN {col_name} {col_type}"
+                            )
+                            print(
+                                f"  ✓ Added column '{col_name}' to token_refresh_config table"
+                            )
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
 
@@ -585,15 +696,22 @@ class Database:
                 captcha_columns_to_add = [
                     ("personal_project_pool_size", "INTEGER DEFAULT 4"),
                     ("personal_max_resident_tabs", "INTEGER DEFAULT 5"),
-                    ("browser_personal_fresh_restart_every_n_solves", "INTEGER DEFAULT 10"),
+                    (
+                        "browser_personal_fresh_restart_every_n_solves",
+                        "INTEGER DEFAULT 10",
+                    ),
                     ("personal_idle_tab_ttl_seconds", "INTEGER DEFAULT 600"),
                 ]
 
                 for col_name, col_type in captcha_columns_to_add:
                     if not await self._column_exists(db, "captcha_config", col_name):
                         try:
-                            await db.execute(f"ALTER TABLE captcha_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to captcha_config table")
+                            await db.execute(
+                                f"ALTER TABLE captcha_config ADD COLUMN {col_name} {col_type}"
+                            )
+                            print(
+                                f"  ✓ Added column '{col_name}' to captcha_config table"
+                            )
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
 
@@ -793,7 +911,7 @@ class Database:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS captcha_config (
                     id INTEGER PRIMARY KEY DEFAULT 1,
-                    captcha_method TEXT DEFAULT 'browser',
+                    captcha_method TEXT DEFAULT 'yescaptcha',
                     yescaptcha_api_key TEXT DEFAULT '',
                     yescaptcha_base_url TEXT DEFAULT 'https://api.yescaptcha.com',
                     yescaptcha_task_type TEXT DEFAULT 'RecaptchaV3TaskProxylessM1S9',
@@ -803,6 +921,8 @@ class Database:
                     ezcaptcha_base_url TEXT DEFAULT 'https://api.ez-captcha.com',
                     capsolver_api_key TEXT DEFAULT '',
                     capsolver_base_url TEXT DEFAULT 'https://api.capsolver.com',
+                    captcharun_api_key TEXT DEFAULT '',
+                    captcharun_base_url TEXT DEFAULT 'https://api.captcha-run.com',
                     remote_browser_base_url TEXT DEFAULT '',
                     remote_browser_api_key TEXT DEFAULT '',
                     remote_browser_timeout INTEGER DEFAULT 60,
@@ -844,19 +964,31 @@ class Database:
             # Create indexes
             await db.execute("CREATE INDEX IF NOT EXISTS idx_task_id ON tasks(task_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_token_st ON tokens(st)")
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_project_id ON projects(project_id)")
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_tokens_email ON tokens(email)")
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_tokens_is_active_last_used_at ON tokens(is_active, last_used_at)")
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_project_id ON projects(project_id)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tokens_email ON tokens(email)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tokens_is_active_last_used_at ON tokens(is_active, last_used_at)"
+            )
 
             # Migrate request_logs table if needed
             await self._migrate_request_logs(db)
 
             # Request logs query indexes (列表按 created_at 排序 / token 过滤)
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at DESC)")
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_token_id_created_at ON request_logs(token_id, created_at DESC)")
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at DESC)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_request_logs_token_id_created_at ON request_logs(token_id, created_at DESC)"
+            )
 
             # Token stats lookup index
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_token_stats_token_id ON token_stats(token_id)")
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_token_stats_token_id ON token_stats(token_id)"
+            )
 
             await db.commit()
 
@@ -915,12 +1047,20 @@ class Database:
                 print("? request_logs?????")
 
             if not await self._column_exists(db, "request_logs", "status_text"):
-                await db.execute("ALTER TABLE request_logs ADD COLUMN status_text TEXT DEFAULT ''")
+                await db.execute(
+                    "ALTER TABLE request_logs ADD COLUMN status_text TEXT DEFAULT ''"
+                )
             if not await self._column_exists(db, "request_logs", "progress"):
-                await db.execute("ALTER TABLE request_logs ADD COLUMN progress INTEGER DEFAULT 0")
+                await db.execute(
+                    "ALTER TABLE request_logs ADD COLUMN progress INTEGER DEFAULT 0"
+                )
             if not await self._column_exists(db, "request_logs", "updated_at"):
-                await db.execute("ALTER TABLE request_logs ADD COLUMN updated_at TIMESTAMP")
-            await db.execute("UPDATE request_logs SET updated_at = created_at WHERE updated_at IS NULL")
+                await db.execute(
+                    "ALTER TABLE request_logs ADD COLUMN updated_at TIMESTAMP"
+                )
+            await db.execute(
+                "UPDATE request_logs SET updated_at = created_at WHERE updated_at IS NULL"
+            )
         except Exception as e:
             print(f"?? request_logs?????: {e}")
             # Continue even if migration fails
@@ -929,7 +1069,8 @@ class Database:
     async def add_token(self, token: Token) -> int:
         """Add a new token"""
         async with self._connect(write=True) as db:
-            cursor = await db.execute("""
+            cursor = await db.execute(
+                """
                 INSERT INTO tokens (st, at, at_expires, email, name, remark, is_active,
                                    credits, user_paygate_tier, current_project_id, current_project_name,
                                    image_enabled, video_enabled, image_concurrency, video_concurrency,
@@ -938,23 +1079,46 @@ class Database:
                                    proxy_url, auto_refresh_enabled, refresh_interval_minutes,
                                    last_st_refresh_at, last_st_refresh_result)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (token.st, token.at, token.at_expires, token.email, token.name, token.remark,
-                  token.is_active, token.credits, token.user_paygate_tier,
-                  token.current_project_id, token.current_project_name,
-                  token.image_enabled, token.video_enabled,
-                  token.image_concurrency, token.video_concurrency,
-                  token.captcha_proxy_url, token.extension_route_key,
-                  token.protocol_mode, token.google_cookies, token.login_account,
-                  token.login_password, token.proxy_url, token.auto_refresh_enabled,
-                  token.refresh_interval_minutes, token.last_st_refresh_at,
-                  token.last_st_refresh_result))
+            """,
+                (
+                    token.st,
+                    token.at,
+                    token.at_expires,
+                    token.email,
+                    token.name,
+                    token.remark,
+                    token.is_active,
+                    token.credits,
+                    token.user_paygate_tier,
+                    token.current_project_id,
+                    token.current_project_name,
+                    token.image_enabled,
+                    token.video_enabled,
+                    token.image_concurrency,
+                    token.video_concurrency,
+                    token.captcha_proxy_url,
+                    token.extension_route_key,
+                    token.protocol_mode,
+                    token.google_cookies,
+                    token.login_account,
+                    token.login_password,
+                    token.proxy_url,
+                    token.auto_refresh_enabled,
+                    token.refresh_interval_minutes,
+                    token.last_st_refresh_at,
+                    token.last_st_refresh_result,
+                ),
+            )
             await db.commit()
             token_id = cursor.lastrowid
 
             # Create stats entry
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT INTO token_stats (token_id) VALUES (?)
-            """, (token_id,))
+            """,
+                (token_id,),
+            )
             await db.commit()
 
             return token_id
@@ -1002,7 +1166,8 @@ class Database:
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             today = self._current_stats_date()
-            cursor = await db.execute("""
+            cursor = await db.execute(
+                """
                 SELECT
                     t.*,
                     COALESCE(ts.image_count, 0) AS image_count,
@@ -1016,7 +1181,9 @@ class Database:
                 FROM tokens t
                 LEFT JOIN token_stats ts ON ts.token_id = t.id
                 ORDER BY t.created_at DESC
-            """, (today, today, today))
+            """,
+                (today, today, today),
+            )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
@@ -1034,7 +1201,8 @@ class Database:
             """)
             token_row = await token_cursor.fetchone()
 
-            stats_cursor = await db.execute("""
+            stats_cursor = await db.execute(
+                """
                 SELECT
                     COALESCE(SUM(image_count), 0) AS total_images,
                     COALESCE(SUM(video_count), 0) AS total_videos,
@@ -1043,7 +1211,9 @@ class Database:
                     COALESCE(SUM(CASE WHEN today_date = ? THEN today_video_count ELSE 0 END), 0) AS today_videos,
                     COALESCE(SUM(CASE WHEN today_date = ? THEN today_error_count ELSE 0 END), 0) AS today_errors
                 FROM token_stats
-            """, (today, today, today))
+            """,
+                (today, today, today),
+            )
             stats_row = await stats_cursor.fetchone()
 
             token_data = dict(token_row) if token_row else {}
@@ -1057,7 +1227,7 @@ class Database:
                 "total_errors": int(stats_data.get("total_errors") or 0),
                 "today_images": int(stats_data.get("today_images") or 0),
                 "today_videos": int(stats_data.get("today_videos") or 0),
-                "today_errors": int(stats_data.get("today_errors") or 0)
+                "today_errors": int(stats_data.get("today_errors") or 0),
             }
 
     async def get_system_info_stats(self) -> Dict[str, int]:
@@ -1076,14 +1246,16 @@ class Database:
             return {
                 "total_tokens": int(data.get("total_tokens") or 0),
                 "active_tokens": int(data.get("active_tokens") or 0),
-                "total_credits": int(data.get("total_credits") or 0)
+                "total_credits": int(data.get("total_credits") or 0),
             }
 
     async def get_active_tokens(self) -> List[Token]:
         """Get all active tokens"""
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM tokens WHERE is_active = 1 ORDER BY last_used_at ASC")
+            cursor = await db.execute(
+                "SELECT * FROM tokens WHERE is_active = 1 ORDER BY last_used_at ASC"
+            )
             rows = await cursor.fetchall()
             return [Token(**dict(row)) for row in rows]
 
@@ -1106,7 +1278,10 @@ class Database:
     async def delete_token(self, token_id: int):
         """Delete token and related data"""
         async with self._connect(write=True) as db:
-            await db.execute("UPDATE request_logs SET token_id = NULL WHERE token_id = ?", (token_id,))
+            await db.execute(
+                "UPDATE request_logs SET token_id = NULL WHERE token_id = ?",
+                (token_id,),
+            )
             await db.execute("DELETE FROM tasks WHERE token_id = ?", (token_id,))
             await db.execute("DELETE FROM token_stats WHERE token_id = ?", (token_id,))
             await db.execute("DELETE FROM projects WHERE token_id = ?", (token_id,))
@@ -1117,11 +1292,19 @@ class Database:
     async def add_project(self, project: Project) -> int:
         """Add a new project"""
         async with self._connect(write=True) as db:
-            cursor = await db.execute("""
+            cursor = await db.execute(
+                """
                 INSERT INTO projects (project_id, token_id, project_name, tool_name, is_active)
                 VALUES (?, ?, ?, ?, ?)
-            """, (project.project_id, project.token_id, project.project_name,
-                  project.tool_name, project.is_active))
+            """,
+                (
+                    project.project_id,
+                    project.token_id,
+                    project.project_name,
+                    project.tool_name,
+                    project.is_active,
+                ),
+            )
             await db.commit()
             return cursor.lastrowid
 
@@ -1129,7 +1312,9 @@ class Database:
         """Get project by UUID"""
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM projects WHERE project_id = ?", (project_id,))
+            cursor = await db.execute(
+                "SELECT * FROM projects WHERE project_id = ?", (project_id,)
+            )
             row = await cursor.fetchone()
             if row:
                 return Project(**dict(row))
@@ -1141,7 +1326,7 @@ class Database:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM projects WHERE token_id = ? ORDER BY created_at DESC",
-                (token_id,)
+                (token_id,),
             )
             rows = await cursor.fetchall()
             return [Project(**dict(row)) for row in rows]
@@ -1156,11 +1341,21 @@ class Database:
     async def create_task(self, task: Task) -> int:
         """Create a new task"""
         async with self._connect(write=True) as db:
-            cursor = await db.execute("""
+            cursor = await db.execute(
+                """
                 INSERT INTO tasks (task_id, token_id, model, prompt, status, progress, scene_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (task.task_id, task.token_id, task.model, task.prompt,
-                  task.status, task.progress, task.scene_id))
+            """,
+                (
+                    task.task_id,
+                    task.token_id,
+                    task.model,
+                    task.prompt,
+                    task.status,
+                    task.progress,
+                    task.scene_id,
+                ),
+            )
             await db.commit()
             return cursor.lastrowid
 
@@ -1168,7 +1363,9 @@ class Database:
         """Get task by ID"""
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
+            cursor = await db.execute(
+                "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
+            )
             row = await cursor.fetchone()
             if row:
                 task_dict = dict(row)
@@ -1212,7 +1409,9 @@ class Database:
         """Get token statistics"""
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM token_stats WHERE token_id = ?", (token_id,))
+            cursor = await db.execute(
+                "SELECT * FROM token_stats WHERE token_id = ?", (token_id,)
+            )
             row = await cursor.fetchone()
             if row:
                 return TokenStats(**dict(row))
@@ -1223,12 +1422,15 @@ class Database:
         async with self._connect(write=True) as db:
             today = self._current_stats_date()
             # Get current stats
-            cursor = await db.execute("SELECT today_date FROM token_stats WHERE token_id = ?", (token_id,))
+            cursor = await db.execute(
+                "SELECT today_date FROM token_stats WHERE token_id = ?", (token_id,)
+            )
             row = await cursor.fetchone()
 
             # If date changed, reset all daily counters before recording today's image usage.
             if row and row[0] != today:
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE token_stats
                     SET image_count = image_count + 1,
                         today_image_count = 1,
@@ -1236,16 +1438,21 @@ class Database:
                         today_error_count = 0,
                         today_date = ?
                     WHERE token_id = ?
-                """, (today, token_id))
+                """,
+                    (today, token_id),
+                )
             else:
                 # Same day, just increment both
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE token_stats
                     SET image_count = image_count + 1,
                         today_image_count = today_image_count + 1,
                         today_date = ?
                     WHERE token_id = ?
-                """, (today, token_id))
+                """,
+                    (today, token_id),
+                )
             await db.commit()
 
     async def increment_video_count(self, token_id: int):
@@ -1253,12 +1460,15 @@ class Database:
         async with self._connect(write=True) as db:
             today = self._current_stats_date()
             # Get current stats
-            cursor = await db.execute("SELECT today_date FROM token_stats WHERE token_id = ?", (token_id,))
+            cursor = await db.execute(
+                "SELECT today_date FROM token_stats WHERE token_id = ?", (token_id,)
+            )
             row = await cursor.fetchone()
 
             # If date changed, reset all daily counters before recording today's video usage.
             if row and row[0] != today:
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE token_stats
                     SET video_count = video_count + 1,
                         today_image_count = 0,
@@ -1266,16 +1476,21 @@ class Database:
                         today_error_count = 0,
                         today_date = ?
                     WHERE token_id = ?
-                """, (today, token_id))
+                """,
+                    (today, token_id),
+                )
             else:
                 # Same day, just increment both
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE token_stats
                     SET video_count = video_count + 1,
                         today_video_count = today_video_count + 1,
                         today_date = ?
                     WHERE token_id = ?
-                """, (today, token_id))
+                """,
+                    (today, token_id),
+                )
             await db.commit()
 
     async def increment_error_count(self, token_id: int):
@@ -1289,12 +1504,15 @@ class Database:
         async with self._connect(write=True) as db:
             today = self._current_stats_date()
             # Get current stats
-            cursor = await db.execute("SELECT today_date FROM token_stats WHERE token_id = ?", (token_id,))
+            cursor = await db.execute(
+                "SELECT today_date FROM token_stats WHERE token_id = ?", (token_id,)
+            )
             row = await cursor.fetchone()
 
             # If date changed, reset all daily counters before recording today's error.
             if row and row[0] != today:
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE token_stats
                     SET error_count = error_count + 1,
                         consecutive_error_count = consecutive_error_count + 1,
@@ -1304,10 +1522,13 @@ class Database:
                         today_date = ?,
                         last_error_at = CURRENT_TIMESTAMP
                     WHERE token_id = ?
-                """, (today, token_id))
+                """,
+                    (today, token_id),
+                )
             else:
                 # Same day, just increment all counters
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE token_stats
                     SET error_count = error_count + 1,
                         consecutive_error_count = consecutive_error_count + 1,
@@ -1315,7 +1536,9 @@ class Database:
                         today_date = ?,
                         last_error_at = CURRENT_TIMESTAMP
                     WHERE token_id = ?
-                """, (today, token_id))
+                """,
+                    (today, token_id),
+                )
             await db.commit()
 
     async def reset_error_count(self, token_id: int):
@@ -1328,9 +1551,12 @@ class Database:
         Note: error_count (total historical errors) is NEVER reset
         """
         async with self._connect(write=True) as db:
-            await db.execute("""
+            await db.execute(
+                """
                 UPDATE token_stats SET consecutive_error_count = 0 WHERE token_id = ?
-            """, (token_id,))
+            """,
+                (token_id,),
+            )
             await db.commit()
 
     # Config operations
@@ -1376,7 +1602,7 @@ class Database:
         enabled: bool,
         proxy_url: Optional[str] = None,
         media_proxy_enabled: Optional[bool] = None,
-        media_proxy_url: Optional[str] = None
+        media_proxy_url: Optional[str] = None,
     ):
         """Update proxy configuration"""
         async with self._connect(write=True) as db:
@@ -1397,20 +1623,28 @@ class Database:
                     else current.get("media_proxy_url")
                 )
 
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE proxy_config
                     SET enabled = ?, proxy_url = ?,
                         media_proxy_enabled = ?, media_proxy_url = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url))
+                """,
+                    (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url),
+                )
             else:
-                new_media_proxy_enabled = media_proxy_enabled if media_proxy_enabled is not None else False
+                new_media_proxy_enabled = (
+                    media_proxy_enabled if media_proxy_enabled is not None else False
+                )
                 new_media_proxy_url = media_proxy_url
-                await db.execute("""
+                await db.execute(
+                    """
                     INSERT INTO proxy_config (id, enabled, proxy_url, media_proxy_enabled, media_proxy_url)
                     VALUES (1, ?, ?, ?, ?)
-                """, (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url))
+                """,
+                    (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url),
+                )
 
             await db.commit()
 
@@ -1457,16 +1691,30 @@ class Database:
                 normalized_max_retries = 3
 
             if row:
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE generation_config
                     SET image_timeout = ?, video_timeout = ?, max_retries = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (normalized_image_timeout, normalized_video_timeout, normalized_max_retries))
+                """,
+                    (
+                        normalized_image_timeout,
+                        normalized_video_timeout,
+                        normalized_max_retries,
+                    ),
+                )
             else:
-                await db.execute("""
+                await db.execute(
+                    """
                     INSERT INTO generation_config (id, image_timeout, video_timeout, max_retries)
                     VALUES (1, ?, ?, ?)
-                """, (normalized_image_timeout, normalized_video_timeout, normalized_max_retries))
+                """,
+                    (
+                        normalized_image_timeout,
+                        normalized_video_timeout,
+                        normalized_max_retries,
+                    ),
+                )
             await db.commit()
 
     async def get_call_logic_config(self) -> CallLogicConfig:
@@ -1479,7 +1727,9 @@ class Database:
                 row_dict = dict(row)
                 mode = row_dict.get("call_mode")
                 if mode not in ("default", "polling"):
-                    row_dict["call_mode"] = "polling" if row_dict.get("polling_mode_enabled") else "default"
+                    row_dict["call_mode"] = (
+                        "polling" if row_dict.get("polling_mode_enabled") else "default"
+                    )
                 return CallLogicConfig(**row_dict)
             return CallLogicConfig(call_mode="default", polling_mode_enabled=False)
 
@@ -1488,20 +1738,25 @@ class Database:
         normalized = "polling" if call_mode == "polling" else "default"
         polling_mode_enabled = normalized == "polling"
         async with self._connect(write=True) as db:
-            await db.execute("""
+            await db.execute(
+                """
                 INSERT OR REPLACE INTO call_logic_config (id, call_mode, polling_mode_enabled, updated_at)
                 VALUES (1, ?, ?, CURRENT_TIMESTAMP)
-            """, (normalized, polling_mode_enabled))
+            """,
+                (normalized, polling_mode_enabled),
+            )
             await db.commit()
 
     # Request log operations
     async def add_request_log(self, log: RequestLog) -> int:
         """Add request log and return log id"""
         async with self._connect(write=True) as db:
-            cursor = await db.execute("""
+            cursor = await db.execute(
+                """
                 INSERT INTO request_logs (token_id, operation, request_body, response_body, status_code, duration, status_text, progress)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
+            """,
+                (
                 log.token_id,
                 log.operation,
                 log.request_body,
@@ -1510,7 +1765,8 @@ class Database:
                 log.duration,
                 log.status_text or "",
                 log.progress,
-            ))
+                ),
+            )
             await db.commit()
             return cursor.lastrowid
 
@@ -1529,7 +1785,9 @@ class Database:
             "status_text",
             "progress",
         }
-        update_fields = {key: value for key, value in kwargs.items() if key in allowed_fields}
+        update_fields = {
+            key: value for key, value in kwargs.items() if key in allowed_fields
+        }
         if not update_fields:
             return
 
@@ -1548,21 +1806,35 @@ class Database:
             )
             await db.commit()
 
-    async def get_logs(self, limit: int = 100, token_id: Optional[int] = None, include_payload: bool = False):
+    async def get_logs(
+        self,
+        limit: int = 100,
+        token_id: Optional[int] = None,
+        include_payload: bool = False,
+    ):
         """Get request logs with token info, optionally including payload fields"""
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
-            payload_columns = "rl.request_body, rl.response_body," if include_payload else ""
+            payload_columns = (
+                "rl.request_body, rl.response_body," if include_payload else ""
+            )
             response_excerpt_column = "substr(COALESCE(rl.response_body, ''), 1, 2048) as response_body_excerpt,"
-            has_status_text = await self._column_exists(db, "request_logs", "status_text")
+            has_status_text = await self._column_exists(
+                db, "request_logs", "status_text"
+            )
             has_progress = await self._column_exists(db, "request_logs", "progress")
             has_updated_at = await self._column_exists(db, "request_logs", "updated_at")
-            status_text_column = "rl.status_text," if has_status_text else "'' as status_text,"
+            status_text_column = (
+                "rl.status_text," if has_status_text else "'' as status_text,"
+            )
             progress_column = "rl.progress," if has_progress else "0 as progress,"
-            updated_at_column = "rl.updated_at," if has_updated_at else "rl.created_at as updated_at,"
+            updated_at_column = (
+                "rl.updated_at," if has_updated_at else "rl.created_at as updated_at,"
+            )
 
             if token_id:
-                cursor = await db.execute(f"""
+                cursor = await db.execute(
+                    f"""
                     SELECT
                         rl.id,
                         rl.token_id,
@@ -1582,9 +1854,12 @@ class Database:
                     WHERE rl.token_id = ?
                     ORDER BY rl.created_at DESC
                     LIMIT ?
-                """, (token_id, limit))
+                """,
+                    (token_id, limit),
+                )
             else:
-                cursor = await db.execute(f"""
+                cursor = await db.execute(
+                    f"""
                     SELECT
                         rl.id,
                         rl.token_id,
@@ -1603,7 +1878,9 @@ class Database:
                     LEFT JOIN tokens t ON rl.token_id = t.id
                     ORDER BY rl.created_at DESC
                     LIMIT ?
-                """, (limit,))
+                """,
+                    (limit,),
+                )
 
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
@@ -1612,13 +1889,20 @@ class Database:
         """Get single request log detail including payload fields"""
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
-            has_status_text = await self._column_exists(db, "request_logs", "status_text")
+            has_status_text = await self._column_exists(
+                db, "request_logs", "status_text"
+            )
             has_progress = await self._column_exists(db, "request_logs", "progress")
             has_updated_at = await self._column_exists(db, "request_logs", "updated_at")
-            status_text_column = "rl.status_text," if has_status_text else "'' as status_text,"
+            status_text_column = (
+                "rl.status_text," if has_status_text else "'' as status_text,"
+            )
             progress_column = "rl.progress," if has_progress else "0 as progress,"
-            updated_at_column = "rl.updated_at," if has_updated_at else "rl.created_at as updated_at,"
-            cursor = await db.execute(f"""
+            updated_at_column = (
+                "rl.updated_at," if has_updated_at else "rl.created_at as updated_at,"
+            )
+            cursor = await db.execute(
+                f"""
                 SELECT
                     rl.id,
                     rl.token_id,
@@ -1637,7 +1921,9 @@ class Database:
                 LEFT JOIN tokens t ON rl.token_id = t.id
                 WHERE rl.id = ?
                 LIMIT 1
-            """, (log_id,))
+            """,
+                (log_id,),
+            )
             row = await cursor.fetchone()
             return dict(row) if row else None
 
@@ -1647,7 +1933,9 @@ class Database:
             await db.execute("DELETE FROM request_logs")
             await db.commit()
 
-    async def init_config_from_toml(self, config_dict: dict, is_first_startup: bool = True):
+    async def init_config_from_toml(
+        self, config_dict: dict, is_first_startup: bool = True
+    ):
         """
         Initialize database configuration from setting.toml
 
@@ -1723,16 +2011,24 @@ class Database:
             config.set_ezcaptcha_base_url(captcha_config.ezcaptcha_base_url)
             config.set_capsolver_api_key(captcha_config.capsolver_api_key)
             config.set_capsolver_base_url(captcha_config.capsolver_base_url)
+            config.set_captcharun_api_key(captcha_config.captcharun_api_key)
+            config.set_captcharun_base_url(captcha_config.captcharun_base_url)
             config.set_remote_browser_base_url(captcha_config.remote_browser_base_url)
             config.set_remote_browser_api_key(captcha_config.remote_browser_api_key)
             config.set_remote_browser_timeout(captcha_config.remote_browser_timeout)
             config.set_browser_count(captcha_config.browser_count)
-            config.set_personal_project_pool_size(captcha_config.personal_project_pool_size)
-            config.set_personal_max_resident_tabs(captcha_config.personal_max_resident_tabs)
+            config.set_personal_project_pool_size(
+                captcha_config.personal_project_pool_size
+            )
+            config.set_personal_max_resident_tabs(
+                captcha_config.personal_max_resident_tabs
+            )
             config.set_browser_personal_fresh_restart_every_n_solves(
                 captcha_config.browser_personal_fresh_restart_every_n_solves
             )
-            config.set_personal_idle_tab_ttl_seconds(captcha_config.personal_idle_tab_ttl_seconds)
+            config.set_personal_idle_tab_ttl_seconds(
+                captcha_config.personal_idle_tab_ttl_seconds
+            )
 
     # Cache config operations
     async def get_cache_config(self) -> CacheConfig:
@@ -1746,7 +2042,9 @@ class Database:
             # Return default if not found
             return CacheConfig(cache_enabled=False, cache_timeout=7200)
 
-    async def update_cache_config(self, enabled: bool = None, timeout: int = None, base_url: Optional[str] = None):
+    async def update_cache_config(
+        self, enabled: bool = None, timeout: int = None, base_url: Optional[str] = None
+    ):
         """Update cache configuration"""
         async with self._connect(write=True) as db:
             db.row_factory = aiosqlite.Row
@@ -1757,36 +2055,51 @@ class Database:
             if row:
                 current = dict(row)
                 # Use new values if provided, otherwise keep existing
-                new_enabled = enabled if enabled is not None else current.get("cache_enabled", False)
-                new_timeout = timeout if timeout is not None else current.get("cache_timeout", 7200)
-                new_base_url = base_url if base_url is not None else current.get("cache_base_url")
+                new_enabled = (
+                    enabled
+                    if enabled is not None
+                    else current.get("cache_enabled", False)
+                )
+                new_timeout = (
+                    timeout
+                    if timeout is not None
+                    else current.get("cache_timeout", 7200)
+                )
+                new_base_url = (
+                    base_url if base_url is not None else current.get("cache_base_url")
+                )
 
                 # If base_url is explicitly set to empty string, treat as None
                 if base_url == "":
                     new_base_url = None
 
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE cache_config
                     SET cache_enabled = ?, cache_timeout = ?, cache_base_url = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (new_enabled, new_timeout, new_base_url))
+                """,
+                    (new_enabled, new_timeout, new_base_url),
+                )
             else:
                 # Insert default row if not exists
                 new_enabled = enabled if enabled is not None else False
                 new_timeout = timeout if timeout is not None else 7200
                 new_base_url = base_url if base_url is not None else None
 
-                await db.execute("""
+                await db.execute(
+                    """
                     INSERT INTO cache_config (id, cache_enabled, cache_timeout, cache_base_url)
                     VALUES (1, ?, ?, ?)
-                """, (new_enabled, new_timeout, new_base_url))
+                """,
+                    (new_enabled, new_timeout, new_base_url),
+                )
 
             await db.commit()
 
     # Debug config operations
-    async def get_debug_config(self) -> 'DebugConfig':
+    async def get_debug_config(self) -> "DebugConfig":
         """Get debug configuration"""
-        from .models import DebugConfig
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM debug_config WHERE id = 1")
@@ -1794,14 +2107,16 @@ class Database:
             if row:
                 return DebugConfig(**dict(row))
             # Return default if not found
-            return DebugConfig(enabled=False, log_requests=True, log_responses=True, mask_token=True)
+            return DebugConfig(
+                enabled=False, log_requests=True, log_responses=True, mask_token=True
+            )
 
     async def update_debug_config(
         self,
         enabled: bool = None,
         log_requests: bool = None,
         log_responses: bool = None,
-        mask_token: bool = None
+        mask_token: bool = None,
     ):
         """Update debug configuration"""
         async with self._connect(write=True) as db:
@@ -1813,16 +2128,33 @@ class Database:
             if row:
                 current = dict(row)
                 # Use new values if provided, otherwise keep existing
-                new_enabled = enabled if enabled is not None else current.get("enabled", False)
-                new_log_requests = log_requests if log_requests is not None else current.get("log_requests", True)
-                new_log_responses = log_responses if log_responses is not None else current.get("log_responses", True)
-                new_mask_token = mask_token if mask_token is not None else current.get("mask_token", True)
+                new_enabled = (
+                    enabled if enabled is not None else current.get("enabled", False)
+                )
+                new_log_requests = (
+                    log_requests
+                    if log_requests is not None
+                    else current.get("log_requests", True)
+                )
+                new_log_responses = (
+                    log_responses
+                    if log_responses is not None
+                    else current.get("log_responses", True)
+                )
+                new_mask_token = (
+                    mask_token
+                    if mask_token is not None
+                    else current.get("mask_token", True)
+                )
 
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE debug_config
                     SET enabled = ?, log_requests = ?, log_responses = ?, mask_token = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (new_enabled, new_log_requests, new_log_responses, new_mask_token))
+                """,
+                    (new_enabled, new_log_requests, new_log_responses, new_mask_token),
+                )
             else:
                 # Insert default row if not exists
                 new_enabled = enabled if enabled is not None else False
@@ -1830,10 +2162,13 @@ class Database:
                 new_log_responses = log_responses if log_responses is not None else True
                 new_mask_token = mask_token if mask_token is not None else True
 
-                await db.execute("""
+                await db.execute(
+                    """
                     INSERT INTO debug_config (id, enabled, log_requests, log_responses, mask_token)
                     VALUES (1, ?, ?, ?, ?)
-                """, (new_enabled, new_log_requests, new_log_responses, new_mask_token))
+                """,
+                    (new_enabled, new_log_requests, new_log_responses, new_mask_token),
+                )
 
             await db.commit()
 
@@ -1860,6 +2195,8 @@ class Database:
         ezcaptcha_base_url: str = None,
         capsolver_api_key: str = None,
         capsolver_base_url: str = None,
+        captcharun_api_key: str = None,
+        captcharun_base_url: str = None,
         remote_browser_base_url: str = None,
         remote_browser_api_key: str = None,
         remote_browser_timeout: int = None,
@@ -1869,7 +2206,7 @@ class Database:
         personal_project_pool_size: int = None,
         personal_max_resident_tabs: int = None,
         browser_personal_fresh_restart_every_n_solves: int = None,
-        personal_idle_tab_ttl_seconds: int = None
+        personal_idle_tab_ttl_seconds: int = None,
     ):
         """Update captcha configuration"""
         async with self._connect(write=True) as db:
@@ -1879,46 +2216,150 @@ class Database:
 
             if row:
                 current = dict(row)
-                new_method = captcha_method if captcha_method is not None else current.get("captcha_method", "yescaptcha")
-                new_yes_key = yescaptcha_api_key if yescaptcha_api_key is not None else current.get("yescaptcha_api_key", "")
-                new_yes_url = yescaptcha_base_url if yescaptcha_base_url is not None else current.get("yescaptcha_base_url", "https://api.yescaptcha.com")
-                new_yes_task_type = normalize_yescaptcha_task_type(
-                    yescaptcha_task_type if yescaptcha_task_type is not None else current.get("yescaptcha_task_type")
+                new_method = (
+                    captcha_method
+                    if captcha_method is not None
+                    else current.get("captcha_method", "yescaptcha")
                 )
-                new_cap_key = capmonster_api_key if capmonster_api_key is not None else current.get("capmonster_api_key", "")
-                new_cap_url = capmonster_base_url if capmonster_base_url is not None else current.get("capmonster_base_url", "https://api.capmonster.cloud")
-                new_ez_key = ezcaptcha_api_key if ezcaptcha_api_key is not None else current.get("ezcaptcha_api_key", "")
-                new_ez_url = ezcaptcha_base_url if ezcaptcha_base_url is not None else current.get("ezcaptcha_base_url", "https://api.ez-captcha.com")
-                new_cs_key = capsolver_api_key if capsolver_api_key is not None else current.get("capsolver_api_key", "")
-                new_cs_url = capsolver_base_url if capsolver_base_url is not None else current.get("capsolver_base_url", "https://api.capsolver.com")
-                new_remote_base_url = remote_browser_base_url if remote_browser_base_url is not None else current.get("remote_browser_base_url", "")
-                new_remote_api_key = remote_browser_api_key if remote_browser_api_key is not None else current.get("remote_browser_api_key", "")
-                new_remote_timeout = remote_browser_timeout if remote_browser_timeout is not None else current.get("remote_browser_timeout", 60)
-                new_proxy_enabled = browser_proxy_enabled if browser_proxy_enabled is not None else current.get("browser_proxy_enabled", False)
-                new_proxy_url = browser_proxy_url if browser_proxy_url is not None else current.get("browser_proxy_url")
-                new_browser_count = browser_count if browser_count is not None else current.get("browser_count", 1)
-                new_personal_project_pool_size = personal_project_pool_size if personal_project_pool_size is not None else current.get("personal_project_pool_size", 4)
-                new_personal_max_tabs = personal_max_resident_tabs if personal_max_resident_tabs is not None else current.get("personal_max_resident_tabs", 5)
+                new_yes_key = (
+                    yescaptcha_api_key
+                    if yescaptcha_api_key is not None
+                    else current.get("yescaptcha_api_key", "")
+                )
+                new_yes_url = (
+                    yescaptcha_base_url
+                    if yescaptcha_base_url is not None
+                    else current.get(
+                        "yescaptcha_base_url", "https://api.yescaptcha.com"
+                    )
+                )
+                new_yes_task_type = normalize_yescaptcha_task_type(
+                    yescaptcha_task_type
+                    if yescaptcha_task_type is not None
+                    else current.get("yescaptcha_task_type")
+                )
+                new_cap_key = (
+                    capmonster_api_key
+                    if capmonster_api_key is not None
+                    else current.get("capmonster_api_key", "")
+                )
+                new_cap_url = (
+                    capmonster_base_url
+                    if capmonster_base_url is not None
+                    else current.get(
+                        "capmonster_base_url", "https://api.capmonster.cloud"
+                    )
+                )
+                new_ez_key = (
+                    ezcaptcha_api_key
+                    if ezcaptcha_api_key is not None
+                    else current.get("ezcaptcha_api_key", "")
+                )
+                new_ez_url = (
+                    ezcaptcha_base_url
+                    if ezcaptcha_base_url is not None
+                    else current.get("ezcaptcha_base_url", "https://api.ez-captcha.com")
+                )
+                new_cs_key = (
+                    capsolver_api_key
+                    if capsolver_api_key is not None
+                    else current.get("capsolver_api_key", "")
+                )
+                new_cs_url = (
+                    capsolver_base_url
+                    if capsolver_base_url is not None
+                    else current.get("capsolver_base_url", "https://api.capsolver.com")
+                )
+                new_run_key = (
+                    captcharun_api_key
+                    if captcharun_api_key is not None
+                    else current.get("captcharun_api_key", "")
+                )
+                new_run_url = (
+                    captcharun_base_url
+                    if captcharun_base_url is not None
+                    else current.get(
+                        "captcharun_base_url", "https://api.captcha-run.com"
+                    )
+                )
+                new_remote_base_url = (
+                    remote_browser_base_url
+                    if remote_browser_base_url is not None
+                    else current.get("remote_browser_base_url", "")
+                )
+                new_remote_api_key = (
+                    remote_browser_api_key
+                    if remote_browser_api_key is not None
+                    else current.get("remote_browser_api_key", "")
+                )
+                new_remote_timeout = (
+                    remote_browser_timeout
+                    if remote_browser_timeout is not None
+                    else current.get("remote_browser_timeout", 60)
+                )
+                new_proxy_enabled = (
+                    browser_proxy_enabled
+                    if browser_proxy_enabled is not None
+                    else current.get("browser_proxy_enabled", False)
+                )
+                new_proxy_url = (
+                    browser_proxy_url
+                    if browser_proxy_url is not None
+                    else current.get("browser_proxy_url")
+                )
+                new_browser_count = (
+                    browser_count
+                    if browser_count is not None
+                    else current.get("browser_count", 1)
+                )
+                new_personal_project_pool_size = (
+                    personal_project_pool_size
+                    if personal_project_pool_size is not None
+                    else current.get("personal_project_pool_size", 4)
+                )
+                new_personal_max_tabs = (
+                    personal_max_resident_tabs
+                    if personal_max_resident_tabs is not None
+                    else current.get("personal_max_resident_tabs", 5)
+                )
                 new_personal_fresh_restart_every = (
                     browser_personal_fresh_restart_every_n_solves
                     if browser_personal_fresh_restart_every_n_solves is not None
-                    else current.get("browser_personal_fresh_restart_every_n_solves", 10)
+                    else current.get(
+                        "browser_personal_fresh_restart_every_n_solves", 10
+                    )
                 )
-                new_personal_idle_ttl = personal_idle_tab_ttl_seconds if personal_idle_tab_ttl_seconds is not None else current.get("personal_idle_tab_ttl_seconds", 600)
-                new_remote_timeout = max(5, int(new_remote_timeout)) if new_remote_timeout is not None else 60
+                new_personal_idle_ttl = (
+                    personal_idle_tab_ttl_seconds
+                    if personal_idle_tab_ttl_seconds is not None
+                    else current.get("personal_idle_tab_ttl_seconds", 600)
+                )
+                new_remote_timeout = (
+                    max(5, int(new_remote_timeout))
+                    if new_remote_timeout is not None
+                    else 60
+                )
                 new_browser_count = max(1, min(20, int(new_browser_count)))
-                new_personal_project_pool_size = max(1, min(50, int(new_personal_project_pool_size)))
-                new_personal_max_tabs = max(1, min(50, int(new_personal_max_tabs)))  # 限制1-50
-                new_personal_fresh_restart_every = max(0, int(new_personal_fresh_restart_every))
+                new_personal_project_pool_size = max(
+                    1, min(50, int(new_personal_project_pool_size))
+                )
+                new_personal_max_tabs = max(
+                    1, min(50, int(new_personal_max_tabs))
+                )  # 限制1-50
+                new_personal_fresh_restart_every = max(
+                    0, int(new_personal_fresh_restart_every)
+                )
                 new_personal_idle_ttl = max(60, int(new_personal_idle_ttl))  # 最少60秒
 
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE captcha_config
                     SET captcha_method = ?, yescaptcha_api_key = ?, yescaptcha_base_url = ?,
                         yescaptcha_task_type = ?,
                         capmonster_api_key = ?, capmonster_base_url = ?,
                         ezcaptcha_api_key = ?, ezcaptcha_base_url = ?,
                         capsolver_api_key = ?, capsolver_base_url = ?,
+                        captcharun_api_key = ?, captcharun_base_url = ?,
                         remote_browser_base_url = ?, remote_browser_api_key = ?, remote_browser_timeout = ?,
                         browser_proxy_enabled = ?, browser_proxy_url = ?, browser_count = ?,
                         personal_project_pool_size = ?,
@@ -1927,61 +2368,161 @@ class Database:
                         personal_idle_tab_ttl_seconds = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (new_method, new_yes_key, new_yes_url, new_yes_task_type,
-                      new_cap_key, new_cap_url,
-                      new_ez_key, new_ez_url, new_cs_key, new_cs_url,
-                      (new_remote_base_url or "").strip(), (new_remote_api_key or "").strip(), new_remote_timeout,
-                      new_proxy_enabled, new_proxy_url, new_browser_count, new_personal_project_pool_size,
-                      new_personal_max_tabs, new_personal_fresh_restart_every, new_personal_idle_ttl))
+                """,
+                    (
+                        new_method,
+                        new_yes_key,
+                        new_yes_url,
+                        new_yes_task_type,
+                        new_cap_key,
+                        new_cap_url,
+                        new_ez_key,
+                        new_ez_url,
+                        new_cs_key,
+                        new_cs_url,
+                        new_run_key,
+                        new_run_url,
+                        (new_remote_base_url or "").strip(),
+                        (new_remote_api_key or "").strip(),
+                        new_remote_timeout,
+                        new_proxy_enabled,
+                        new_proxy_url,
+                        new_browser_count,
+                        new_personal_project_pool_size,
+                        new_personal_max_tabs,
+                        new_personal_fresh_restart_every,
+                        new_personal_idle_ttl,
+                    ),
+                )
             else:
-                new_method = captcha_method if captcha_method is not None else "yescaptcha"
-                new_yes_key = yescaptcha_api_key if yescaptcha_api_key is not None else ""
-                new_yes_url = yescaptcha_base_url if yescaptcha_base_url is not None else "https://api.yescaptcha.com"
+                new_method = (
+                    captcha_method if captcha_method is not None else "yescaptcha"
+                )
+                new_yes_key = (
+                    yescaptcha_api_key if yescaptcha_api_key is not None else ""
+                )
+                new_yes_url = (
+                    yescaptcha_base_url
+                    if yescaptcha_base_url is not None
+                    else "https://api.yescaptcha.com"
+                )
                 new_yes_task_type = normalize_yescaptcha_task_type(yescaptcha_task_type)
-                new_cap_key = capmonster_api_key if capmonster_api_key is not None else ""
-                new_cap_url = capmonster_base_url if capmonster_base_url is not None else "https://api.capmonster.cloud"
+                new_cap_key = (
+                    capmonster_api_key if capmonster_api_key is not None else ""
+                )
+                new_cap_url = (
+                    capmonster_base_url
+                    if capmonster_base_url is not None
+                    else "https://api.capmonster.cloud"
+                )
                 new_ez_key = ezcaptcha_api_key if ezcaptcha_api_key is not None else ""
-                new_ez_url = ezcaptcha_base_url if ezcaptcha_base_url is not None else "https://api.ez-captcha.com"
+                new_ez_url = (
+                    ezcaptcha_base_url
+                    if ezcaptcha_base_url is not None
+                    else "https://api.ez-captcha.com"
+                )
                 new_cs_key = capsolver_api_key if capsolver_api_key is not None else ""
-                new_cs_url = capsolver_base_url if capsolver_base_url is not None else "https://api.capsolver.com"
-                new_remote_base_url = remote_browser_base_url if remote_browser_base_url is not None else ""
-                new_remote_api_key = remote_browser_api_key if remote_browser_api_key is not None else ""
-                new_remote_timeout = remote_browser_timeout if remote_browser_timeout is not None else 60
-                new_proxy_enabled = browser_proxy_enabled if browser_proxy_enabled is not None else False
+                new_cs_url = (
+                    capsolver_base_url
+                    if capsolver_base_url is not None
+                    else "https://api.capsolver.com"
+                )
+                new_run_key = (
+                    captcharun_api_key if captcharun_api_key is not None else ""
+                )
+                new_run_url = (
+                    captcharun_base_url
+                    if captcharun_base_url is not None
+                    else "https://api.captcha-run.com"
+                )
+                new_remote_base_url = (
+                    remote_browser_base_url
+                    if remote_browser_base_url is not None
+                    else ""
+                )
+                new_remote_api_key = (
+                    remote_browser_api_key if remote_browser_api_key is not None else ""
+                )
+                new_remote_timeout = (
+                    remote_browser_timeout if remote_browser_timeout is not None else 60
+                )
+                new_proxy_enabled = (
+                    browser_proxy_enabled
+                    if browser_proxy_enabled is not None
+                    else False
+                )
                 new_proxy_url = browser_proxy_url
                 new_browser_count = browser_count if browser_count is not None else 1
-                new_personal_project_pool_size = personal_project_pool_size if personal_project_pool_size is not None else 4
-                new_personal_max_tabs = personal_max_resident_tabs if personal_max_resident_tabs is not None else 5
+                new_personal_project_pool_size = (
+                    personal_project_pool_size
+                    if personal_project_pool_size is not None
+                    else 4
+                )
+                new_personal_max_tabs = (
+                    personal_max_resident_tabs
+                    if personal_max_resident_tabs is not None
+                    else 5
+                )
                 new_personal_fresh_restart_every = (
                     browser_personal_fresh_restart_every_n_solves
                     if browser_personal_fresh_restart_every_n_solves is not None
                     else 10
                 )
-                new_personal_idle_ttl = personal_idle_tab_ttl_seconds if personal_idle_tab_ttl_seconds is not None else 600
+                new_personal_idle_ttl = (
+                    personal_idle_tab_ttl_seconds
+                    if personal_idle_tab_ttl_seconds is not None
+                    else 600
+                )
                 new_remote_timeout = max(5, int(new_remote_timeout))
                 new_browser_count = max(1, min(20, int(new_browser_count)))
-                new_personal_project_pool_size = max(1, min(50, int(new_personal_project_pool_size)))
+                new_personal_project_pool_size = max(
+                    1, min(50, int(new_personal_project_pool_size))
+                )
                 new_personal_max_tabs = max(1, min(50, int(new_personal_max_tabs)))
-                new_personal_fresh_restart_every = max(0, int(new_personal_fresh_restart_every))
+                new_personal_fresh_restart_every = max(
+                    0, int(new_personal_fresh_restart_every)
+                )
                 new_personal_idle_ttl = max(60, int(new_personal_idle_ttl))
 
-                await db.execute("""
+                await db.execute(
+                    """
                     INSERT INTO captcha_config (id, captcha_method, yescaptcha_api_key, yescaptcha_base_url,
                         yescaptcha_task_type,
                         capmonster_api_key, capmonster_base_url, ezcaptcha_api_key, ezcaptcha_base_url,
                         capsolver_api_key, capsolver_base_url,
+                        captcharun_api_key, captcharun_base_url,
                         remote_browser_base_url, remote_browser_api_key, remote_browser_timeout,
                         browser_proxy_enabled, browser_proxy_url, browser_count,
                         personal_project_pool_size,
                         personal_max_resident_tabs, browser_personal_fresh_restart_every_n_solves,
                         personal_idle_tab_ttl_seconds)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (new_method, new_yes_key, new_yes_url, new_yes_task_type,
-                      new_cap_key, new_cap_url,
-                      new_ez_key, new_ez_url, new_cs_key, new_cs_url,
-                      (new_remote_base_url or "").strip(), (new_remote_api_key or "").strip(), new_remote_timeout,
-                      new_proxy_enabled, new_proxy_url, new_browser_count, new_personal_project_pool_size,
-                      new_personal_max_tabs, new_personal_fresh_restart_every, new_personal_idle_ttl))
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        new_method,
+                        new_yes_key,
+                        new_yes_url,
+                        new_yes_task_type,
+                        new_cap_key,
+                        new_cap_url,
+                        new_ez_key,
+                        new_ez_url,
+                        new_cs_key,
+                        new_cs_url,
+                        new_run_key,
+                        new_run_url,
+                        (new_remote_base_url or "").strip(),
+                        (new_remote_api_key or "").strip(),
+                        new_remote_timeout,
+                        new_proxy_enabled,
+                        new_proxy_url,
+                        new_browser_count,
+                        new_personal_project_pool_size,
+                        new_personal_max_tabs,
+                        new_personal_fresh_restart_every,
+                        new_personal_idle_ttl,
+                    ),
+                )
 
             await db.commit()
 
@@ -1996,7 +2537,9 @@ class Database:
                 return PluginConfig(**dict(row))
             return PluginConfig()
 
-    async def update_plugin_config(self, connection_token: str, auto_enable_on_update: bool = True):
+    async def update_plugin_config(
+        self, connection_token: str, auto_enable_on_update: bool = True
+    ):
         """Update plugin configuration"""
         async with self._connect(write=True) as db:
             db.row_factory = aiosqlite.Row
@@ -2004,16 +2547,22 @@ class Database:
             row = await cursor.fetchone()
 
             if row:
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE plugin_config
                     SET connection_token = ?, auto_enable_on_update = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (connection_token, auto_enable_on_update))
+                """,
+                    (connection_token, auto_enable_on_update),
+                )
             else:
-                await db.execute("""
+                await db.execute(
+                    """
                     INSERT INTO plugin_config (id, connection_token, auto_enable_on_update)
                     VALUES (1, ?, ?)
-                """, (connection_token, auto_enable_on_update))
+                """,
+                    (connection_token, auto_enable_on_update),
+                )
 
             await db.commit()
 
@@ -2038,7 +2587,9 @@ class Database:
             cursor = await db.execute("SELECT * FROM token_refresh_config WHERE id = 1")
             row = await cursor.fetchone()
             current = dict(row) if row else {}
-            new_enabled = enabled if enabled is not None else bool(current.get("enabled", True))
+            new_enabled = (
+                enabled if enabled is not None else bool(current.get("enabled", True))
+            )
             try:
                 new_interval = int(
                     refresh_interval_minutes
@@ -2050,16 +2601,22 @@ class Database:
             new_interval = max(1, new_interval)
 
             if row:
-                await db.execute("""
+                await db.execute(
+                    """
                     UPDATE token_refresh_config
                     SET enabled = ?, refresh_interval_minutes = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (new_enabled, new_interval))
+                """,
+                    (new_enabled, new_interval),
+                )
             else:
-                await db.execute("""
+                await db.execute(
+                    """
                     INSERT INTO token_refresh_config (id, enabled, refresh_interval_minutes)
                     VALUES (1, ?, ?)
-                """, (new_enabled, new_interval))
+                """,
+                    (new_enabled, new_interval),
+                )
             await db.commit()
 
         return await self.get_token_refresh_config()

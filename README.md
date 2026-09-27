@@ -50,8 +50,10 @@
 
 - 由于Flow增加了额外的验证码，你可以自行选择使用浏览器打码或第三发打码：
 注册[YesCaptcha](https://yescaptcha.com/i/13Xd8K)并获取api key，将其填入系统配置页面```YesCaptcha API密钥```区域
+注册[CapSolver](https://dashboard.capsolver.com/passport/register?inviteCode=z95yVf1HvixI)并获取api key，将其填入系统配置页面```CapSolver API密钥```区域
+注册[Captcha.run](https://captcha.run/sso?inviter=36179602-dbd1-4227-8ec8-98f8c0170c59)并获取api key，将其填入系统配置页面```Captcha.run API密钥```区域
 - YesCaptcha 支持在管理页切换 `type`：`RecaptchaV3TaskProxyless`、`RecaptchaV3TaskProxylessM1`、`RecaptchaV3TaskProxylessM1S7`、`RecaptchaV3TaskProxylessM1S9`；当前默认推荐 `M1S9`，S7/S9 会强制提交 `minScore` 0.7/0.9。
-- 默认 `docker-compose.yml` 建议搭配第三方打码（yescaptcha/capmonster/ezcaptcha/capsolver）。
+- 默认 `docker-compose.yml` 建议搭配第三方打码（yescaptcha/captcharun/capmonster/ezcaptcha/capsolver）。
 如需 Docker 内有头打码（browser/personal），请使用下方 `docker-compose.headed.yml`。
 
 - 自动更新st浏览器拓展：[Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater)
@@ -190,7 +192,20 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 
 ### 视频生成
 
-#### 文生视频 (T2V - Text to Video)
+当前 `/v1/models` 与 Gemini `/models` 只公开 Flow 现行模型族。旧下划线模型名继续兼容，但不再出现在模型列表中。
+
+| 当前公开名称 | 上游模型族 | 能力 |
+|---|---|---|
+| `veo-3.1-lite` / `veo-3.1-fast` / `veo-3.1-quality` / `omni-1.1-flash` | 当前默认模型 | 8 秒横屏文生视频 |
+| `veo-3.1-lite-{4|6|8}s-{landscape|portrait}` | Veo 3.1 - Lite | 文生视频 |
+| `veo-3.1-fast-{4|6|8}s-{landscape|portrait}` | Veo 3.1 - Fast | 文生视频 |
+| `veo-3.1-quality-{4|6|8}s-{landscape|portrait}` | Veo 3.1 - Quality | 文生视频 |
+| `omni-1.1-flash-{4|6|8|10}s-{landscape|portrait}` | Omni 1.1 Flash (`abra`) | 文生/参考图视频 |
+| `veo-3.1-{lite|fast|quality}-i2v-{4|6}s-{landscape|portrait}` | Veo 3.1 | 首帧/首尾帧视频 |
+| `veo-3.1-{lite|fast}-r2v-8s-{landscape|portrait}` | Veo 3.1 | 多参考图视频 |
+| `veo-3.1-{lite|fast|quality}-extend-8s-{landscape|portrait}` | Veo 3.1 | 视频续写 |
+
+#### 兼容旧名：文生视频 (T2V - Text to Video)
 ⚠️ **不支持上传图片**
 
 | 模型名称 | 说明| 尺寸 |
@@ -218,7 +233,7 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 | `veo_3_1_t2v_lite_6s_portrait` | 文生视频 Lite 6秒 | 竖屏 |
 | `veo_3_1_t2v_lite_6s_landscape` | 文生视频 Lite 6秒 | 横屏 |
 
-#### 首尾帧模型 (I2V - Image to Video)
+#### 兼容旧名：首尾帧模型 (I2V - Image to Video)
 📸 **支持1-2张图片：1张作为首帧，2张作为首尾帧**
 
 > 💡 **自动适配**：系统会根据图片数量自动选择对应的 model_key
@@ -258,7 +273,7 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 | `veo_3_1_interpolation_lite_6s_portrait` | 图生视频 Lite 6秒（首尾帧过渡） | 竖屏 |
 | `veo_3_1_interpolation_lite_6s_landscape` | 图生视频 Lite 6秒（首尾帧过渡） | 横屏 |
 
-#### 多图生成 (R2V - Reference Images to Video)
+#### 兼容旧名：多图生成 (R2V - Reference Images to Video)
 🖼️ **支持多张图片**
 
 > **2026-03-06 更新**
@@ -280,7 +295,7 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 | `veo_3_1_r2v_fast_portrait_ultra_relaxed` | 图生视频 | 竖屏 |
 | `veo_3_1_r2v_fast_landscape_ultra_relaxed` | 图生视频 | 横屏 |
 
-#### 视频放大模型 (Upsample)
+#### 兼容旧名：视频放大模型 (Upsample)
 
 这些模型不是直接调用上游 upsampler key，而是先用对应的 Veo 3.1 普通模型生成视频，再提交 1080P/4K 放大请求。
 
@@ -440,7 +455,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Authorization: Bearer han1234" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "veo_3_1_t2v_fast_landscape",
+    "model": "veo-3.1-fast-8s-landscape",
     "messages": [
       {
         "role": "user",
@@ -458,7 +473,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Authorization: Bearer han1234" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "veo_3_1_i2v_s_fast_fl_landscape",
+    "model": "veo-3.1-fast-i2v-4s-landscape",
     "messages": [
       {
         "role": "user",
@@ -497,7 +512,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Authorization: Bearer han1234" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "veo_3_1_r2v_fast_portrait",
+    "model": "veo-3.1-fast-r2v-8s-portrait",
     "messages": [
       {
         "role": "user",

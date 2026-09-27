@@ -108,13 +108,17 @@ class ExtensionCaptchaService:
             if token and token.extension_route_key:
                 return token.extension_route_key.strip()
         except Exception as e:
-            debug_logger.log_warning(f"[Extension Captcha] Failed to resolve route key for token {token_id}: {e}")
+            debug_logger.log_warning(
+                f"[Extension Captcha] Failed to resolve route key for token {token_id}: {e}"
+            )
         return ""
 
     def _has_connection_for_route_key(self, route_key: str) -> bool:
         return self._select_connection(route_key) is not None
 
-    async def has_connection_for_token(self, token_id: Optional[int]) -> tuple[bool, str]:
+    async def has_connection_for_token(
+        self, token_id: Optional[int]
+    ) -> tuple[bool, str]:
         route_key = await self._resolve_route_key(token_id)
         return self._has_connection_for_route_key(route_key), route_key
 
@@ -126,8 +130,12 @@ class ExtensionCaptchaService:
             if message_type == "register":
                 conn = self._find_connection(websocket)
                 if conn:
-                    conn.route_key = (payload.get("route_key") or conn.route_key or "").strip()
-                    conn.client_label = (payload.get("client_label") or conn.client_label or "").strip()
+                    conn.route_key = (
+                        payload.get("route_key") or conn.route_key or ""
+                    ).strip()
+                    conn.client_label = (
+                        payload.get("client_label") or conn.client_label or ""
+                    ).strip()
                     debug_logger.log_info(
                         f"[Extension Captcha] Client registered route_key={conn.route_key or '-'}, "
                         f"label={conn.client_label or '-'}"
@@ -146,7 +154,9 @@ class ExtensionCaptchaService:
             if req_id and req_id in self.pending_requests:
                 future, owner_websocket = self.pending_requests[req_id]
                 if websocket is not owner_websocket:
-                    debug_logger.log_warning(f"[Extension Captcha] Ignoring response from non-owner connection: {req_id}")
+                    debug_logger.log_warning(
+                        f"[Extension Captcha] Ignoring response from non-owner connection: {req_id}"
+                    )
                     return
                 if not future.done():
                     future.set_result(payload)
@@ -161,8 +171,12 @@ class ExtensionCaptchaService:
         token_id: Optional[int] = None,
     ) -> Optional[str]:
         if not self.active_connections:
-            debug_logger.log_warning("[Extension Captcha] No active extension connections available.")
-            raise RuntimeError("Chrome Extension not connected or Google Labs tab not open.")
+            debug_logger.log_warning(
+                "[Extension Captcha] No active extension connections available."
+            )
+            raise RuntimeError(
+                "Chrome Extension not connected or Google Labs tab not open."
+            )
 
         route_key = await self._resolve_route_key(token_id)
         conn = self._select_connection(route_key)
@@ -197,11 +211,15 @@ class ExtensionCaptchaService:
                 return result.get("token")
 
             error_msg = result.get("error")
-            debug_logger.log_error(f"[Extension Captcha] Error from extension: {error_msg}")
+            debug_logger.log_error(
+                f"[Extension Captcha] Error from extension: {error_msg}"
+            )
             return None
 
         except asyncio.TimeoutError:
-            debug_logger.log_error(f"[Extension Captcha] Timeout waiting for token (req_id: {req_id})")
+            debug_logger.log_error(
+                f"[Extension Captcha] Timeout waiting for token (req_id: {req_id})"
+            )
             return None
         except Exception as e:
             debug_logger.log_error(f"[Extension Captcha] Communication error: {e}")
@@ -209,6 +227,10 @@ class ExtensionCaptchaService:
         finally:
             self.pending_requests.pop(req_id, None)
 
-    async def report_flow_error(self, project_id: str, error_reason: str, error_message: str = ""):
+    async def report_flow_error(
+        self, project_id: str, error_reason: str, error_message: str = ""
+    ):
         _ = project_id, error_message
-        debug_logger.log_warning(f"[Extension Captcha] Flow error reported (ignoring): {error_reason}")
+        debug_logger.log_warning(
+            f"[Extension Captcha] Flow error reported (ignoring): {error_reason}"
+        )

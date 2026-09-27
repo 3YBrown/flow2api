@@ -1,4 +1,5 @@
 """FastAPI application initialization"""
+
 import asyncio
 import os
 import sys
@@ -40,7 +41,11 @@ def _configure_stdio_utf8() -> None:
 def _configure_local_no_proxy() -> None:
     for env_name in ("NO_PROXY", "no_proxy"):
         raw_value = str(os.environ.get(env_name, "") or "")
-        entries = [item.strip() for item in raw_value.replace(";", ",").split(",") if item.strip()]
+        entries = [
+            item.strip()
+            for item in raw_value.replace(";", ",").split(",")
+            if item.strip()
+        ]
         normalized = {item.lower() for item in entries}
         changed = False
         for host in _LOCAL_NO_PROXY_HOSTS:
@@ -103,7 +108,9 @@ async def lifespan(app: FastAPI):
 
     # Handle database initialization based on startup type
     if is_first_startup:
-        print("First startup detected. Initializing database and configuration from setting.toml...")
+        print(
+            "First startup detected. Initializing database and configuration from setting.toml..."
+        )
         await db.init_config_from_toml(config_dict, is_first_startup=True)
         print("Database and configuration initialized successfully.")
     else:
@@ -129,14 +136,20 @@ async def lifespan(app: FastAPI):
             resolve_effective_browser_count,
             resolve_effective_personal_max_resident_tabs,
         )
+
         browser_service = await BrowserCaptchaService.get_instance(db)
         print("Browser captcha service initialized (nodriver mode)")
 
-        warmup_limit = max(1, min(
+        warmup_limit = max(
+            1,
+            min(
             PERSONAL_POOL_MAX_TOTAL_RESIDENT_TABS,
             resolve_effective_browser_count(config.browser_count)
-            * resolve_effective_personal_max_resident_tabs(config.personal_max_resident_tabs),
-        ))
+                * resolve_effective_personal_max_resident_tabs(
+                    config.personal_max_resident_tabs
+                ),
+            ),
+        )
         warmup_project_ids = await token_manager.get_personal_warmup_project_ids(
             tokens=tokens,
             limit=warmup_limit,
@@ -151,10 +164,7 @@ async def lifespan(app: FastAPI):
             )
         except Exception as e:
             warmup_error = e
-            print(
-                "Browser captcha resident warmup failed: "
-                f"{type(e).__name__}: {e}"
-            )
+            print(f"Browser captcha resident warmup failed: {type(e).__name__}: {e}")
         if warmed_slots:
             print(
                 f"Browser captcha shared resident tabs warmed "
@@ -170,6 +180,7 @@ async def lifespan(app: FastAPI):
             print("No active token found, opened login window for manual setup")
     elif captcha_config.captcha_method == "browser":
         from .services.browser_captcha import BrowserCaptchaService
+
         browser_service = await BrowserCaptchaService.get_instance(db)
         await browser_service.warmup_browser_slots()
         print("Browser captcha service initialized (headed mode)")
@@ -179,13 +190,18 @@ async def lifespan(app: FastAPI):
 
     if config.captcha_method == "remote_browser":
         try:
-            warmed_projects = await flow_client.prefill_remote_browser_for_tokens(tokens, action="IMAGE_GENERATION")
-            print(f"Remote browser pool prefill started for {warmed_projects} project(s)")
+            warmed_projects = await flow_client.prefill_remote_browser_for_tokens(
+                tokens, action="IMAGE_GENERATION"
+            )
+            print(
+                f"Remote browser pool prefill started for {warmed_projects} project(s)"
+            )
         except Exception as e:
             print(f"Remote browser pool prefill failed: {e}")
 
     # Start 429 auto-unban task
     import asyncio
+
     async def auto_unban_task():
         """定时任务：每小时检查并解禁429被禁用的token"""
         while True:
@@ -200,7 +216,9 @@ async def lifespan(app: FastAPI):
 
     print("Database initialized")
     print(f"Total tokens: {len(tokens)}")
-    print(f"Cache: {'Enabled' if config.cache_enabled else 'Disabled'} (timeout: {config.cache_timeout}s)")
+    print(
+        f"Cache: {'Enabled' if config.cache_enabled else 'Disabled'} (timeout: {config.cache_timeout}s)"
+    )
     if cache_cleanup_enabled:
         print("File cache cleanup task started")
     else:
@@ -245,7 +263,7 @@ generation_handler = GenerationHandler(
     load_balancer,
     db,
     concurrency_manager,
-    proxy_manager  # 添加 proxy_manager 参数
+    proxy_manager,  # 添加 proxy_manager 参数
 )
 
 # Set dependencies
@@ -257,7 +275,7 @@ app = FastAPI(
     title="Flow2API",
     description="OpenAI-compatible API for Google VideoFX (Veo)",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -297,7 +315,9 @@ async def index():
     login_file = static_path / "login.html"
     if login_file.exists():
         return _static_page_response(login_file)
-    return HTMLResponse(content="<h1>Flow2API</h1><p>Frontend not found</p>", status_code=404)
+    return HTMLResponse(
+        content="<h1>Flow2API</h1><p>Frontend not found</p>", status_code=404
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -338,6 +358,8 @@ async def metrics():
     """Prometheus metrics endpoint for the main Flow2API service."""
     payload = await render_main_metrics(db, concurrency_manager=concurrency_manager)
     return Response(content=payload, media_type=CONTENT_TYPE_LATEST)
+
+
 def _ensure_admin_page_session(request: Request):
     token = admin.get_admin_token_from_cookie(request)
     if not admin.is_admin_session_token_valid(token):

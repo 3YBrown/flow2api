@@ -1,4 +1,5 @@
 """Configuration management for Flow2API"""
+
 import os
 import tomli
 from pathlib import Path
@@ -122,8 +123,7 @@ class Config:
         """图片生成单次 HTTP 请求超时(秒)。"""
         default_timeout = min(self.flow_timeout, 40)
         timeout = self._config.get("flow", {}).get(
-            "image_request_timeout",
-            default_timeout
+            "image_request_timeout", default_timeout
         )
         try:
             return max(5, int(timeout))
@@ -153,20 +153,14 @@ class Config:
         """网络超时时是否切换媒体代理重试。"""
         return bool(
             self._config.get("flow", {}).get(
-                "image_timeout_use_media_proxy_fallback",
-                True
+                "image_timeout_use_media_proxy_fallback", True
             )
         )
 
     @property
     def flow_image_prefer_media_proxy(self) -> bool:
         """图片生成是否优先走媒体代理链路。"""
-        return bool(
-            self._config.get("flow", {}).get(
-                "image_prefer_media_proxy",
-                False
-            )
-        )
+        return bool(self._config.get("flow", {}).get("image_prefer_media_proxy", False))
 
     @property
     def flow_image_slot_wait_timeout(self) -> float:
@@ -439,7 +433,9 @@ class Config:
     @property
     def browser_recaptcha_settle_seconds(self) -> float:
         """有头打码在 reload/clr 就绪后的额外等待秒数。"""
-        value = self._config.get("captcha", {}).get("browser_recaptcha_settle_seconds", 3.0)
+        value = self._config.get("captcha", {}).get(
+            "browser_recaptcha_settle_seconds", 3.0
+        )
         try:
             return max(0.0, min(10.0, float(value)))
         except Exception:
@@ -465,7 +461,9 @@ class Config:
     @property
     def browser_captcha_generation_retries(self) -> int:
         """生成接口因 reCAPTCHA 评估失败时允许的总重试次数。"""
-        value = self._config.get("captcha", {}).get("browser_captcha_generation_retries", 6)
+        value = self._config.get("captcha", {}).get(
+            "browser_captcha_generation_retries", 6
+        )
         try:
             return max(1, min(20, int(value)))
         except Exception:
@@ -492,7 +490,9 @@ class Config:
     @property
     def personal_idle_tab_ttl_seconds(self) -> int:
         """内置浏览器打码标签页空闲超时(秒)"""
-        value = self._config.get("captcha", {}).get("personal_idle_tab_ttl_seconds", 600)
+        value = self._config.get("captcha", {}).get(
+            "personal_idle_tab_ttl_seconds", 600
+        )
         try:
             return max(60, int(value))
         except Exception:
@@ -510,13 +510,17 @@ class Config:
         """设置内置浏览器打码单实例共享标签页上限"""
         if "captcha" not in self._config:
             self._config["captcha"] = {}
-        self._config["captcha"]["personal_max_resident_tabs"] = max(1, min(50, int(value)))
+        self._config["captcha"]["personal_max_resident_tabs"] = max(
+            1, min(50, int(value))
+        )
 
     def set_personal_project_pool_size(self, value: int):
         """设置单个 Token 默认维护的项目池数量，仅影响项目轮换"""
         if "captcha" not in self._config:
             self._config["captcha"] = {}
-        self._config["captcha"]["personal_project_pool_size"] = max(1, min(50, int(value)))
+        self._config["captcha"]["personal_project_pool_size"] = max(
+            1, min(50, int(value))
+        )
 
     def set_personal_idle_tab_ttl_seconds(self, value: int):
         """设置内置浏览器打码标签页空闲超时(秒)"""
@@ -527,7 +531,9 @@ class Config:
     @property
     def browser_personal_fresh_restart_every_n_solves(self) -> int:
         """内置浏览器成功打码多少次后使用全新 profile 重启，0 表示禁用。"""
-        value = self._config.get("captcha", {}).get("browser_personal_fresh_restart_every_n_solves", 10)
+        value = self._config.get("captcha", {}).get(
+            "browser_personal_fresh_restart_every_n_solves", 10
+        )
         try:
             return max(0, int(value))
         except Exception:
@@ -537,7 +543,9 @@ class Config:
         """设置内置浏览器 fresh profile 轮换阈值。"""
         if "captcha" not in self._config:
             self._config["captcha"] = {}
-        self._config["captcha"]["browser_personal_fresh_restart_every_n_solves"] = max(0, int(value))
+        self._config["captcha"]["browser_personal_fresh_restart_every_n_solves"] = max(
+            0, int(value)
+        )
 
     @property
     def yescaptcha_api_key(self) -> str:
@@ -553,7 +561,9 @@ class Config:
     @property
     def yescaptcha_base_url(self) -> str:
         """Get YesCaptcha base URL"""
-        return self._config.get("captcha", {}).get("yescaptcha_base_url", "https://api.yescaptcha.com")
+        return self._config.get("captcha", {}).get(
+            "yescaptcha_base_url", "https://api.yescaptcha.com"
+        )
 
     def set_yescaptcha_base_url(self, base_url: str):
         """Set YesCaptcha base URL"""
@@ -575,7 +585,9 @@ class Config:
         """Set YesCaptcha reCAPTCHA V3 task type"""
         if "captcha" not in self._config:
             self._config["captcha"] = {}
-        self._config["captcha"]["yescaptcha_task_type"] = normalize_yescaptcha_task_type(task_type)
+        self._config["captcha"]["yescaptcha_task_type"] = (
+            normalize_yescaptcha_task_type(task_type)
+        )
 
     @property
     def capmonster_api_key(self) -> str:
@@ -591,7 +603,9 @@ class Config:
     @property
     def capmonster_base_url(self) -> str:
         """Get CapMonster base URL"""
-        return self._config.get("captcha", {}).get("capmonster_base_url", "https://api.capmonster.cloud")
+        return self._config.get("captcha", {}).get(
+            "capmonster_base_url", "https://api.capmonster.cloud"
+        )
 
     def set_capmonster_base_url(self, base_url: str):
         """Set CapMonster base URL"""
@@ -613,7 +627,9 @@ class Config:
     @property
     def ezcaptcha_base_url(self) -> str:
         """Get EzCaptcha base URL"""
-        return self._config.get("captcha", {}).get("ezcaptcha_base_url", "https://api.ez-captcha.com")
+        return self._config.get("captcha", {}).get(
+            "ezcaptcha_base_url", "https://api.ez-captcha.com"
+        )
 
     def set_ezcaptcha_base_url(self, base_url: str):
         """Set EzCaptcha base URL"""
@@ -635,13 +651,35 @@ class Config:
     @property
     def capsolver_base_url(self) -> str:
         """Get CapSolver base URL"""
-        return self._config.get("captcha", {}).get("capsolver_base_url", "https://api.capsolver.com")
+        return self._config.get("captcha", {}).get(
+            "capsolver_base_url", "https://api.capsolver.com"
+        )
 
     def set_capsolver_base_url(self, base_url: str):
         """Set CapSolver base URL"""
         if "captcha" not in self._config:
             self._config["captcha"] = {}
         self._config["captcha"]["capsolver_base_url"] = base_url
+
+    @property
+    def captcharun_api_key(self) -> str:
+        return self._config.get("captcha", {}).get("captcharun_api_key", "")
+
+    def set_captcharun_api_key(self, api_key: str):
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        self._config["captcha"]["captcharun_api_key"] = api_key
+
+    @property
+    def captcharun_base_url(self) -> str:
+        return self._config.get("captcha", {}).get(
+            "captcharun_base_url", "https://api.captcha-run.com"
+        )
+
+    def set_captcharun_base_url(self, base_url: str):
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        self._config["captcha"]["captcharun_base_url"] = base_url
 
     @property
     def remote_browser_base_url(self) -> str:
