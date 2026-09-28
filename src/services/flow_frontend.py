@@ -5,9 +5,11 @@ import random
 import re
 import uuid
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 from curl_cffi.requests import AsyncSession
+
+from .browser_cookie_utils import serialize_cookie_header_for_url
 
 
 class FlowFrontendMixin:
@@ -19,52 +21,22 @@ class FlowFrontendMixin:
 
     @staticmethod
     def _parse_flow_cookie_storage(raw: Optional[str]) -> str:
-        text = str(raw or "").strip()
-        if not text:
-            return ""
+        return serialize_cookie_header_for_url(raw)
 
-        try:
-            data = json.loads(text)
-        except (TypeError, ValueError):
-            data = None
-
-        cookies: Dict[str, str] = {}
-        if isinstance(data, list):
-            for item in data:
-                if not isinstance(item, dict):
-                    continue
-                domain = str(item.get("domain") or "").strip().lower().lstrip(".")
-                if domain and domain not in {"google.com", "flow.google.com"}:
-                    continue
-                name = str(item.get("name") or "").strip()
-                value = str(item.get("value") or "").strip()
-                if FlowFrontendMixin._is_safe_cookie_pair(name, value):
-                    cookies[name] = value
-        elif isinstance(data, dict):
-            for key, value in data.items():
-                name = str(key or "").strip()
-                normalized_value = str(value or "").strip()
-                if FlowFrontendMixin._is_safe_cookie_pair(name, normalized_value):
-                    cookies[name] = normalized_value
-
-        if data is None:
-            for part in text.split(";"):
-                name, separator, value = part.strip().partition("=")
-                if separator and FlowFrontendMixin._is_safe_cookie_pair(
-                    name.strip(),
-                    value.strip(),
-                ):
-                    cookies[name.strip()] = value.strip()
-
-        return "; ".join(f"{name}={value}" for name, value in cookies.items())
-
-    @staticmethod
-    def _is_safe_cookie_pair(name: str, value: str) -> bool:
-        if not name or not value or "\r" in name or "\n" in name:
-            return False
-        if ";" in value or any(ord(character) < 0x20 for character in value):
-            return False
-        return bool(re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+", name))
+    async def _resolve_flow_frontend_cookie_storage(
+        self,
+        google_cookies: Optional[str] = None,
+        token_id: Optional[int] = None,
+    ) -> str:
+        cookie_storage = str(google_cookies or "").strip()
+        if not cookie_storage and token_id is not None and self.db is not None:
+            token = await self.db.get_token(int(token_id))
+            cookie_storage = (
+                str(getattr(token, "google_cookies", "") or "").strip()
+                if token
+                else ""
+            )
+        return cookie_storage
 
     @staticmethod
     def _parse_batchexecute_frames(response_text: str) -> List[List[Any]]:
@@ -120,7 +92,15 @@ class FlowFrontendMixin:
                 if not isinstance(item, list) or len(item) < 3:
                     continue
                 if item[0] == "er":
-                    code = item[6] if len(item) > 6 else "unknown"
+                    code = item[5] if len(item) > 5 and item[5] is not None else None
+                    if code is None and len(item) > 6:
+                        code = item[6]
+                    code = code if code is not None else "unknown"
+                    if str(code) == "401":
+                        raise RuntimeError(
+                            "Flow 登录认证失败：Google Cookie 已失效、不完整，或来自不同账号 "
+                            f"(rpc={rpc_id}, code=401)"
+                        )
                     raise RuntimeError(
                         f"Flow frontend RPC rejected: rpc={rpc_id}, code={code}"
                     )
@@ -141,14 +121,13 @@ class FlowFrontendMixin:
         self,
         google_cookies: Optional[str] = None,
         token_id: Optional[int] = None,
+        target_url: str = "https://flow.google.com/projects",
     ) -> str:
-        cookie_storage = str(google_cookies or "").strip()
-        if not cookie_storage and token_id is not None and self.db is not None:
-            token = await self.db.get_token(int(token_id))
-            cookie_storage = (
-                str(getattr(token, "google_cookies", "") or "").strip() if token else ""
-            )
-        cookie_header = self._parse_flow_cookie_storage(cookie_storage)
+        cookie_storage = await self._resolve_flow_frontend_cookie_storage(
+            google_cookies=google_cookies,
+            token_id=token_id,
+        )
+        cookie_header = serialize_cookie_header_for_url(cookie_storage, target_url)
         if not cookie_header:
             raise RuntimeError(
                 "Flow frontend generation requires Google session cookies"
@@ -636,6 +615,14 @@ class FlowFrontendMixin:
                 timeout=max(10, min(int(timeout or 30), 30)),
                 impersonate=self._resolve_runtime_impersonate(),
             )
+        response_host = str(urlparse(str(response.url)).hostname or "").lower()
+        if response.status_code in {401, 403} or (
+            response_host and response_host != "flow.google.com"
+        ):
+            raise RuntimeError(
+                "Flow 登录认证失败：Google Cookie 已失效、不完整，或登录态被重定向 "
+                f"(code={response.status_code})"
+            )
         if response.status_code >= 400:
             raise RuntimeError(
                 f"Flow frontend bootstrap failed: HTTP {response.status_code}"
@@ -650,17 +637,22 @@ class FlowFrontendMixin:
         timeout: int,
         project_id: Optional[str] = None,
         source_path: Optional[str] = None,
+        cookie_storage: Optional[str] = None,
     ) -> Any:
-        if not cookie_header:
-            raise RuntimeError("Flow frontend RPC requires Google session cookies")
-
         resolved_source_path = source_path or (
             f"/project/{project_id}" if project_id else "/projects"
         )
         page_url = f"https://flow.google.com{resolved_source_path}"
+        bootstrap_cookie_header = (
+            serialize_cookie_header_for_url(cookie_storage, page_url)
+            if str(cookie_storage or "").strip()
+            else cookie_header
+        )
+        if not bootstrap_cookie_header:
+            raise RuntimeError("Flow frontend RPC requires Google session cookies")
         bootstrap_text = await self._load_flow_frontend_bootstrap(
             page_url,
-            cookie_header,
+            bootstrap_cookie_header,
             timeout,
         )
         bootloader_match = re.search(
@@ -681,13 +673,20 @@ class FlowFrontendMixin:
             f"&f.sid={frontend_session_id}&hl=en"
             f"&_reqid={request_counter}&rt=c"
         )
+        rpc_cookie_header = (
+            serialize_cookie_header_for_url(cookie_storage, url)
+            if str(cookie_storage or "").strip()
+            else cookie_header
+        )
+        if not rpc_cookie_header:
+            raise RuntimeError("Flow frontend RPC requires Google session cookies")
         headers = {
             "Accept": "*/*",
             "Accept-Language": self._get_primary_accept_language(
                 fallback="en-US,en;q=0.9"
             ),
             "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            "Cookie": cookie_header,
+            "Cookie": rpc_cookie_header,
             "Origin": "https://flow.google.com",
             "Referer": f"https://flow.google.com{resolved_source_path}",
             "sec-fetch-dest": "empty",

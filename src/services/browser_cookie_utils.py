@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
@@ -27,6 +29,19 @@ _SESSION_TOKEN_COOKIE_NAMES = (
     "__Secure-next-auth.session-token",
     "next-auth.session-token",
 )
+FLOW_SESSION_COOKIE_NAMES = frozenset({"OSID", "__Secure-OSID"})
+GOOGLE_ACCOUNT_COOKIE_NAMES = frozenset(
+    {
+        "SID",
+        "HSID",
+        "SSID",
+        "APISID",
+        "SAPISID",
+        "__Secure-1PSID",
+        "__Secure-3PSID",
+    }
+)
+_SAFE_COOKIE_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
 
 def normalize_cookie_header_text(raw_cookie: Optional[str]) -> str:
@@ -97,7 +112,7 @@ def _build_cookie_from_mapping(
     same_site = _normalize_same_site(raw_cookie.get("sameSite"))
     if same_site:
         cookie["sameSite"] = same_site
-    expires = raw_cookie.get("expires")
+    expires = raw_cookie.get("expires", raw_cookie.get("expirationDate"))
     if expires not in (None, ""):
         try:
             cookie["expires"] = float(expires)
@@ -308,6 +323,156 @@ def serialize_cookie_header(
             continue
         parts.append(f"{name}={str(cookie.get('value') or '')}")
     return "; ".join(parts)
+
+
+def _is_safe_cookie_pair(name: str, value: str) -> bool:
+    if not name or not value or not _SAFE_COOKIE_NAME.fullmatch(name):
+        return False
+    return ";" not in value and not any(ord(character) < 0x20 for character in value)
+
+
+def _cookie_path_matches(request_path: str, cookie_path: str) -> bool:
+    normalized_path = cookie_path if cookie_path.startswith("/") else "/"
+    if request_path == normalized_path:
+        return True
+    if not request_path.startswith(normalized_path):
+        return False
+    return normalized_path.endswith("/") or request_path[len(normalized_path) :].startswith(
+        "/"
+    )
+
+
+def _cookie_mapping_matches_url(cookie: Dict[str, Any], target_url: str) -> bool:
+    target = urlparse(target_url)
+    target_host = str(target.hostname or "").strip().lower()
+    target_path = target.path or "/"
+    if not target_host:
+        return False
+
+    domain = str(cookie.get("domain") or "").strip().lower()
+    host_only = bool(cookie.get("hostOnly"))
+    if domain:
+        normalized_domain = domain.lstrip(".")
+        if host_only:
+            if target_host != normalized_domain:
+                return False
+        elif target_host != normalized_domain and not target_host.endswith(
+            f".{normalized_domain}"
+        ):
+            return False
+    else:
+        cookie_url = str(cookie.get("url") or "").strip()
+        if cookie_url:
+            cookie_host = str(urlparse(cookie_url).hostname or "").strip().lower()
+            if cookie_host and cookie_host != target_host:
+                return False
+
+    if bool(cookie.get("secure")) and target.scheme.lower() != "https":
+        return False
+    if not _cookie_path_matches(target_path, str(cookie.get("path") or "/")):
+        return False
+
+    expires = cookie.get("expirationDate", cookie.get("expires"))
+    if expires not in (None, "", 0, -1):
+        try:
+            if float(expires) <= time.time():
+                return False
+        except (TypeError, ValueError):
+            pass
+
+    partition_key = cookie.get("partitionKey")
+    if isinstance(partition_key, dict):
+        top_level_site = str(partition_key.get("topLevelSite") or "").strip()
+        if top_level_site:
+            partition_host = str(urlparse(top_level_site).hostname or "").lower()
+            if partition_host and not (
+                partition_host == "google.com" or partition_host.endswith(".google.com")
+            ):
+                return False
+    return True
+
+
+def cookie_pairs_for_url(
+    raw_cookie: Any,
+    target_url: str = "https://flow.google.com/projects",
+) -> List[tuple[str, str]]:
+    """Return the cookie pairs a browser would send to ``target_url``.
+
+    Structured browser exports retain scope and duplicate cookie names. Plain
+    Cookie headers remain supported for existing installations.
+    """
+
+    normalized = normalize_cookie_storage_text(raw_cookie)
+    if not normalized:
+        return []
+
+    payload: Any = None
+    if normalized[:1] in {"[", "{"}:
+        try:
+            payload = json.loads(normalized)
+        except (TypeError, ValueError):
+            payload = None
+
+    if isinstance(payload, dict) and isinstance(payload.get("cookies"), list):
+        payload = payload["cookies"]
+    elif isinstance(payload, dict) and {"name", "value"}.issubset(payload):
+        payload = [payload]
+
+    if isinstance(payload, list):
+        scoped: List[tuple[int, int, str, str]] = []
+        for index, item in enumerate(payload):
+            if not isinstance(item, dict) or not _cookie_mapping_matches_url(
+                item, target_url
+            ):
+                continue
+            name = str(item.get("name") or "").strip()
+            value = str(item.get("value") or "").strip()
+            if not _is_safe_cookie_pair(name, value):
+                continue
+            path_length = len(str(item.get("path") or "/"))
+            scoped.append((path_length, index, name, value))
+        scoped.sort(key=lambda record: (-record[0], record[1]))
+        return [(name, value) for _, _, name, value in scoped]
+
+    if isinstance(payload, dict):
+        pairs: List[tuple[str, str]] = []
+        for raw_name, raw_value in payload.items():
+            name = str(raw_name or "").strip()
+            value = str(raw_value or "").strip()
+            if _is_safe_cookie_pair(name, value):
+                pairs.append((name, value))
+        return pairs
+
+    pairs = []
+    for chunk in normalized.replace("\n", ";").split(";"):
+        name, separator, value = chunk.strip().partition("=")
+        name = name.strip()
+        value = value.strip()
+        if separator and _is_safe_cookie_pair(name, value):
+            pairs.append((name, value))
+    return pairs
+
+
+def serialize_cookie_header_for_url(
+    raw_cookie: Any,
+    target_url: str = "https://flow.google.com/projects",
+) -> str:
+    return "; ".join(
+        f"{name}={value}" for name, value in cookie_pairs_for_url(raw_cookie, target_url)
+    )
+
+
+def validate_flow_cookie_storage(raw_cookie: Any) -> str:
+    pairs = cookie_pairs_for_url(raw_cookie)
+    names = {name for name, _ in pairs}
+    missing: List[str] = []
+    if not names.intersection(FLOW_SESSION_COOKIE_NAMES):
+        missing.append("flow.google.com 会话 Cookie（OSID 或 __Secure-OSID）")
+    if not names.intersection(GOOGLE_ACCOUNT_COOKIE_NAMES):
+        missing.append(".google.com 账号 Cookie（SID/HSID/SSID/APISID/SAPISID）")
+    if missing:
+        raise ValueError("Google Cookies 不完整，缺少" + "、".join(missing))
+    return "; ".join(f"{name}={value}" for name, value in pairs)
 
 
 def extract_session_token_from_cookie_payload(

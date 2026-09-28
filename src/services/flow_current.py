@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from ..core.logger import debug_logger
+from .browser_cookie_utils import validate_flow_cookie_storage
 
 
 class CurrentFlowClientMixin:
@@ -103,14 +104,18 @@ class CurrentFlowClientMixin:
         source_path: Optional[str] = None,
         timeout: Optional[int] = None,
     ) -> Any:
-        cookie_header = await self._frontend_cookie(google_cookies, token_id)
+        cookie_storage = await self._resolve_flow_frontend_cookie_storage(
+            google_cookies=google_cookies,
+            token_id=token_id,
+        )
         return await self._call_flow_frontend_rpc(
             rpc_id=rpc_id,
             argument=argument,
-            cookie_header=cookie_header,
+            cookie_header="",
             timeout=timeout or self._get_control_plane_timeout(),
             project_id=project_id,
             source_path=source_path,
+            cookie_storage=cookie_storage,
         )
 
     async def st_to_at(
@@ -119,6 +124,8 @@ class CurrentFlowClientMixin:
         google_cookies: Optional[str] = None,
         token_id: Optional[int] = None,
     ) -> dict:
+        if str(google_cookies or "").strip():
+            validate_flow_cookie_storage(google_cookies)
         credits = await self.get_credits(
             self.FRONTEND_ACCESS_TOKEN,
             google_cookies=google_cookies,

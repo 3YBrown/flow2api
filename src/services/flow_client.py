@@ -1406,16 +1406,17 @@ class _FlowClientBase(FlowFrontendMixin):
         Returns:
             project_id (UUID)
         """
-        cookie_header = self._parse_flow_cookie_storage(google_cookies)
-        if cookie_header:
+        cookie_storage = str(google_cookies or "").strip()
+        if cookie_storage:
             try:
                 payload = await self._call_flow_frontend_rpc(
                     rpc_id="jHPbke",
                     argument=["projects/*", [None, [title]], [None, 22]],
-                    cookie_header=cookie_header,
+                    cookie_header="",
                     timeout=max(
                         self._get_control_plane_timeout(), min(self.timeout, 20)
                     ),
+                    cookie_storage=cookie_storage,
                 )
                 project_id = self._extract_flow_project_id(payload)
                 if not project_id:
@@ -1803,20 +1804,20 @@ class _FlowClientBase(FlowFrontendMixin):
             perf_trace: 生成重试与链路耗时轨迹
         """
         url = f"{self.api_base_url}/projects/{project_id}/flowMedia:batchGenerateImages"
-        frontend_cookie_header = ""
+        frontend_cookie_storage = ""
         if not image_inputs and (google_cookies or token_id is not None):
             try:
-                frontend_cookie_header = (
-                    await self._resolve_flow_frontend_cookie_header(
+                frontend_cookie_storage = (
+                    await self._resolve_flow_frontend_cookie_storage(
                         google_cookies=google_cookies,
                         token_id=token_id,
                     )
                 )
             except RuntimeError:
-                frontend_cookie_header = ""
+                frontend_cookie_storage = ""
 
         # The frontend attempt is extra; legacy keeps its configured retry budget.
-        max_retries = config.flow_max_retries + (1 if frontend_cookie_header else 0)
+        max_retries = config.flow_max_retries + (1 if frontend_cookie_storage else 0)
         last_error = None
         perf_trace: Dict[str, Any] = {
             "max_retries": max_retries,
@@ -1862,7 +1863,7 @@ class _FlowClientBase(FlowFrontendMixin):
                     token_id=token_id,
                     website_url=(
                         self._build_flow_frontend_project_page_url(project_id)
-                        if frontend_cookie_header
+                        if frontend_cookie_storage
                         else None
                     ),
                 )
@@ -1924,7 +1925,7 @@ class _FlowClientBase(FlowFrontendMixin):
             }
 
             try:
-                if frontend_cookie_header:
+                if frontend_cookie_storage:
                     frontend_payload = await self._call_flow_frontend_rpc(
                         rpc_id="ogiZ0b",
                         argument=self._build_frontend_image_generation_argument(
@@ -1935,9 +1936,10 @@ class _FlowClientBase(FlowFrontendMixin):
                             recaptcha_token=recaptcha_token,
                             session_id=str(uuid.uuid4()).upper(),
                         ),
-                        cookie_header=frontend_cookie_header,
+                        cookie_header="",
                         timeout=max(config.flow_image_request_timeout, 90),
                         project_id=project_id,
+                        cookie_storage=frontend_cookie_storage,
                     )
                     result = self._normalize_frontend_image_generation_response(
                         frontend_payload
@@ -1966,12 +1968,12 @@ class _FlowClientBase(FlowFrontendMixin):
                     (time.time() - attempt_started_at) * 1000
                 )
                 perf_trace["generation_attempts"].append(attempt_trace)
-                if frontend_cookie_header:
+                if frontend_cookie_storage:
                     debug_logger.log_warning(
                         "[IMAGE] Flow frontend RPC failed; falling back to the legacy "
                         f"generation endpoint: {e}"
                     )
-                    frontend_cookie_header = ""
+                    frontend_cookie_storage = ""
                     continue
                 should_retry = await self._handle_retryable_generation_error(
                     error=e,
@@ -2447,21 +2449,21 @@ class _FlowClientBase(FlowFrontendMixin):
             }
         """
         url = f"{self.api_base_url}/video:batchAsyncGenerateVideoText"
-        frontend_cookie_header = ""
+        frontend_cookie_storage = ""
         if google_cookies or token_id is not None:
             try:
-                frontend_cookie_header = (
-                    await self._resolve_flow_frontend_cookie_header(
+                frontend_cookie_storage = (
+                    await self._resolve_flow_frontend_cookie_storage(
                         google_cookies=google_cookies,
                         token_id=token_id,
                     )
                 )
             except RuntimeError:
-                frontend_cookie_header = ""
+                frontend_cookie_storage = ""
 
         # 403/reCAPTCHA 重试逻辑 - reCAPTCHA evaluation failed 时允许更高重试上限
         max_retries = self._resolve_generation_retry_budget(config.flow_max_retries)
-        if frontend_cookie_header:
+        if frontend_cookie_storage:
             max_retries += 1
         last_error = None
         retry_attempt = 0
@@ -2487,7 +2489,7 @@ class _FlowClientBase(FlowFrontendMixin):
                     token_id=token_id,
                     website_url=(
                         self._build_flow_frontend_project_page_url(project_id)
-                        if frontend_cookie_header
+                        if frontend_cookie_storage
                         else None
                     ),
                 )
@@ -2507,7 +2509,7 @@ class _FlowClientBase(FlowFrontendMixin):
                     retry_attempt += 1
                     continue
                 raise last_error
-            if not frontend_cookie_header and not video_context_warmed:
+            if not frontend_cookie_storage and not video_context_warmed:
                 await self._warmup_flow_video_frontend_context(
                     at=at,
                     project_id=project_id,
@@ -2549,7 +2551,7 @@ class _FlowClientBase(FlowFrontendMixin):
             }
 
             try:
-                if frontend_cookie_header:
+                if frontend_cookie_storage:
                     frontend_payload = await self._call_flow_frontend_rpc(
                         rpc_id="YhhmEf",
                         argument=self._build_frontend_video_generation_argument(
@@ -2559,9 +2561,10 @@ class _FlowClientBase(FlowFrontendMixin):
                             recaptcha_token=recaptcha_token,
                             session_id=str(uuid.uuid4()).upper(),
                         ),
-                        cookie_header=frontend_cookie_header,
+                        cookie_header="",
                         timeout=max(self._get_video_submit_timeout(), 90),
                         project_id=project_id,
+                        cookie_storage=frontend_cookie_storage,
                     )
                     return self._normalize_frontend_video_submission(
                         frontend_payload,
@@ -2584,12 +2587,12 @@ class _FlowClientBase(FlowFrontendMixin):
                 )
             except Exception as e:
                 last_error = e
-                if frontend_cookie_header:
+                if frontend_cookie_storage:
                     debug_logger.log_warning(
                         "[VIDEO T2V] Flow frontend RPC failed; falling back to the "
                         f"legacy generation endpoint: {e}"
                     )
-                    frontend_cookie_header = ""
+                    frontend_cookie_storage = ""
                     retry_attempt += 1
                     continue
                 should_retry = await self._handle_retryable_generation_error(
@@ -4324,7 +4327,7 @@ class _FlowClientBase(FlowFrontendMixin):
                         operation_ids.append(operation_id)
                 if not operation_ids:
                     raise ValueError("视频状态查询缺少 Flow frontend operation ID")
-                cookie_header = await self._resolve_flow_frontend_cookie_header(
+                cookie_storage = await self._resolve_flow_frontend_cookie_storage(
                     google_cookies=google_cookies,
                     token_id=token_id,
                 )
@@ -4336,9 +4339,10 @@ class _FlowClientBase(FlowFrontendMixin):
                         None,
                         [[operation_id] for operation_id in operation_ids],
                     ],
-                    cookie_header=cookie_header,
+                    cookie_header="",
                     timeout=max(self._get_video_poll_timeout(), 30),
                     project_id=(first_operation or {}).get("projectId"),
+                    cookie_storage=cookie_storage,
                 )
                 return self._normalize_frontend_video_status(payload, operations)
             except Exception as frontend_error:

@@ -2656,7 +2656,7 @@ async def plugin_update_token(
     except Exception as cookie_error:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid Google cookies: {str(cookie_error)}",
+            detail=f"Google Cookie 验证失败：{str(cookie_error)}",
         ) from cookie_error
 
     cookie_hash = hashlib.sha256(google_cookies.encode("utf-8")).hexdigest()[:32]

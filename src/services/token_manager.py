@@ -333,7 +333,7 @@ class TokenManager:
             st = f"frontend-{cookie_hash}"
         existing_token = await self.db.get_token_by_st(st) if st else None
         if existing_token:
-            raise ValueError(f"Token ??????: {existing_token.email}?")
+            raise ValueError(f"Token 已存在：{existing_token.email}")
 
         debug_logger.log_info(f"[ADD_TOKEN] Converting ST to AT...")
         try:
@@ -363,7 +363,7 @@ class TokenManager:
         except ValueError:
             raise
         except Exception as e:
-            raise ValueError(f"ST?AT??: {str(e)}")
+            raise ValueError(f"Google Cookie 验证失败：{str(e)}")
 
         try:
             credits_result = await self.flow_client.get_credits(
@@ -413,7 +413,7 @@ class TokenManager:
                     )
                 )
             except Exception as e:
-                raise ValueError(f"??????: {str(e)}")
+                raise ValueError(f"创建项目失败：{str(e)}")
 
         token = Token(
             st=st,
