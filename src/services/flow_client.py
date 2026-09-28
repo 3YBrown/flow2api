@@ -403,7 +403,7 @@ class _FlowClientBase(FlowFrontendMixin):
         force_no_proxy: bool = False,
         allow_urllib_fallback: bool = True,
         apply_default_client_headers: bool = True,
-        impersonate: str = "chrome136",
+        impersonate: str = "chrome",
     ) -> Dict[str, Any]:
         """统一HTTP请求处理"""
         fingerprint = self._request_fingerprint_ctx.get()
@@ -659,7 +659,7 @@ class _FlowClientBase(FlowFrontendMixin):
         apply_default_client_headers: bool = True,
         return_error_response: bool = False,
         redact_sensitive_logs: bool = False,
-        impersonate: str = "chrome136",
+        impersonate: str = "chrome",
     ) -> str:
         """执行原始文本请求（如 SSE），返回响应文本。"""
         fingerprint = self._request_fingerprint_ctx.get()
@@ -1075,11 +1075,11 @@ class _FlowClientBase(FlowFrontendMixin):
             content_type="text/plain;charset=UTF-8"
         )
 
-    def _resolve_runtime_impersonate(self, fallback: str = "chrome136") -> str:
+    def _resolve_runtime_impersonate(self, fallback: str = "chrome") -> str:
         resolved = self._resolve_impersonate_from_fingerprint(fallback=fallback)
         return resolved or fallback
 
-    def _resolve_impersonate_from_fingerprint(self, fallback: str = "chrome136") -> str:
+    def _resolve_impersonate_from_fingerprint(self, fallback: str = "chrome") -> str:
         """根据当前请求链路绑定的浏览器指纹，选择最接近的 curl_cffi impersonate。"""
         fingerprint = self.get_request_fingerprint()
         if not isinstance(fingerprint, dict):
@@ -1106,22 +1106,7 @@ class _FlowClientBase(FlowFrontendMixin):
         if "chrome/" not in ua_lower and "chromium/" not in ua_lower:
             return fallback
 
-        import re
-
-        match = re.search(r"(?:chrome|chromium)/(\d+)", ua_lower)
-        if not match:
-            return "chrome"
-
-        major = int(match.group(1))
-        supported = [99, 100, 101, 104, 107, 110, 116, 119, 120, 123, 124, 131, 136]
-        if major in supported:
-            return f"chrome{major}"
-        if major > max(supported):
-            return f"chrome{max(supported)}"
-        lower_or_equal = [v for v in supported if v <= major]
-        if lower_or_equal:
-            return f"chrome{max(lower_or_equal)}"
-        return fallback
+        return "chrome"
 
     async def _make_video_api_request(
         self,
@@ -4475,7 +4460,7 @@ class _FlowClientBase(FlowFrontendMixin):
                     headers=headers,
                     proxy=proxy_url,
                     timeout=request_timeout,
-                    impersonate="chrome136",
+                    impersonate="chrome",
                     allow_redirects=False,
                 )
 
@@ -5423,7 +5408,7 @@ class _FlowClientBase(FlowFrontendMixin):
                 async with AsyncSession() as session:
                     request_options = {
                         "headers": headers,
-                        "impersonate": "chrome136",
+                        "impersonate": "chrome",
                         "timeout": 30,
                     }
                     if proxy:
@@ -5493,14 +5478,14 @@ class _FlowClientBase(FlowFrontendMixin):
                         result = await session.post(
                             create_url,
                             json=create_data,
-                            impersonate="chrome136",
+                            impersonate="chrome",
                             proxy=proxy,
                         )
                     else:
                         result = await session.post(
                             create_url,
                             json=create_data,
-                            impersonate="chrome136",
+                            impersonate="chrome",
                             proxies=proxies,
                         )
 
@@ -5554,13 +5539,13 @@ class _FlowClientBase(FlowFrontendMixin):
                     # 根据代理类型使用不同参数
                     if proxy:
                         result = await session.post(
-                            get_url, json=get_data, impersonate="chrome136", proxy=proxy
+                            get_url, json=get_data, impersonate="chrome", proxy=proxy
                         )
                     else:
                         result = await session.post(
                             get_url,
                             json=get_data,
-                            impersonate="chrome136",
+                            impersonate="chrome",
                             proxies=proxies,
                         )
                     result_json = result.json()

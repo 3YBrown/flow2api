@@ -247,22 +247,8 @@ def _schedule_captcha_runtime_prepare(method: str) -> bool:
 
 
 def _guess_impersonate_from_user_agent(user_agent: str) -> str:
-    """从 UA 选择可用的 curl_cffi 浏览器指纹版本。"""
-    ua = (user_agent or "").strip()
-    major_match = re.search(r"(?:Chrome|Chromium|Edg|EdgA|EdgiOS)/(\d+)", ua)
-    if not major_match:
-        return "chrome120"
-
-    try:
-        major = int(major_match.group(1))
-    except Exception:
-        return "chrome120"
-
-    if major >= 124:
-        return "chrome136"
-    if major >= 120:
-        return "chrome120"
-    return "chrome120"
+    """使用 curl_cffi 当前安装版本支持的 Chrome 指纹别名。"""
+    return "chrome"
 
 
 def _build_proxy_map(proxy_url: str) -> Optional[Dict[str, str]]:
@@ -515,7 +501,7 @@ async def _solve_recaptcha_with_api_service(
                 f"{base_url.rstrip('/')}/v2/tasks",
                 headers=headers,
                 json=task,
-                impersonate="chrome136",
+                impersonate="chrome",
                 timeout=30,
             )
             payload = response.json()
@@ -527,7 +513,7 @@ async def _solve_recaptcha_with_api_service(
                 response = await session.get(
                     f"{base_url.rstrip('/')}/v2/tasks/{task_id}",
                     headers=headers,
-                    impersonate="chrome136",
+                    impersonate="chrome",
                     timeout=30,
                 )
                 payload = response.json()

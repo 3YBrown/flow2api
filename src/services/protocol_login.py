@@ -11,7 +11,7 @@ from .browser_cookie_utils import validate_flow_cookie_storage
 
 
 FLOW_BASE = "https://flow.google.com"
-IMPERSONATE = "chrome136"
+IMPERSONATE = "chrome"
 
 
 class ProtocolLogin:
