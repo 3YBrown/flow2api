@@ -1145,6 +1145,12 @@ def _compose_proxy_url(
     return f"{protocol}://{auth}{host}:{port}"
 
 
+def _redact_proxy_url(proxy_url: Optional[str]) -> str:
+    """Hide proxy credentials while preserving the endpoint for diagnostics."""
+    value = str(proxy_url or "").strip()
+    return re.sub(r"(://)[^/@\s]+:[^/@\s]+@", r"\1***:***@", value)
+
+
 def _parse_windows_proxy_server_candidates(proxy_server: str) -> list[str]:
     """Parse Windows Internet Settings ProxyServer into normalized proxy URLs."""
     normalized_candidates: list[str] = []
@@ -6870,7 +6876,7 @@ class BrowserCaptchaService:
 
         说明：
         - 原始 Cookie 头没有 domain 元数据时，直接扩展到 labs/google/recaptcha 三个目标。
-        - 即使 token.cookie 已经带有显式的 google.com 域，也额外镜像一份到
+        - 即使 token.google_cookies 已经带有显式的 google.com 域，也额外镜像一份到
           `www.recaptcha.net`，保证 enterprise reload 首轮请求也能命中 cookie。
         - 对 Google/reCAPTCHA Cookie 强制使用 `SameSite=None`
           场景下第三方 anchor/reload 请求继续丢 cookie。
@@ -7302,7 +7308,11 @@ class BrowserCaptchaService:
                 f"[BrowserCaptcha] 读取 token cookie 失败 (token_id={token_key}): {e}"
             )
             return None
-        cookie_text = str(getattr(token, "cookie", "") or "").strip() if token else ""
+        cookie_text = (
+            str(getattr(token, "google_cookies", "") or "").strip()
+            if token
+            else ""
+        )
         return cookie_text or None
 
     def _build_cdp_cookie_params(
@@ -7591,14 +7601,16 @@ class BrowserCaptchaService:
             merged_signature = self._normalize_cookie_signature(merged_cookie_text)
 
             if previous_storage_text != merged_cookie_text:
-                await self.db.update_token(int(token_key), cookie=merged_cookie_text)
+                await self.db.update_token(
+                    int(token_key), google_cookies=merged_cookie_text
+                )
                 debug_logger.log_info(
-                    f"[BrowserCaptcha] 已回填 context cookies 到 token.cookie "
+                    f"[BrowserCaptcha] 已回填 context cookies 到 token.google_cookies "
                     f"(slot={resident_info.slot_id}, token_id={token_key}, cookies={len(serialized_cookies)})"
                 )
             else:
                 debug_logger.log_info(
-                    f"[BrowserCaptcha] context cookies 与 token.cookie 一致，跳过写回 "
+                    f"[BrowserCaptcha] context cookies 与 token.google_cookies 一致，跳过写回 "
                     f"(slot={resident_info.slot_id}, token_id={token_key}, cookies={len(serialized_cookies)})"
                 )
 
@@ -7608,7 +7620,7 @@ class BrowserCaptchaService:
             return True
         except Exception as e:
             debug_logger.log_warning(
-                f"[BrowserCaptcha] 回填 context cookies 到 token.cookie 失败 "
+                f"[BrowserCaptcha] 回填 context cookies 到 token.google_cookies 失败 "
                 f"(slot={resident_info.slot_id}, token_id={token_key}): {e}"
             )
             return False
@@ -9197,7 +9209,8 @@ class BrowserCaptchaService:
                 pooled_proxy = await self.db.pick_browser_proxy_from_pool()
                 if pooled_proxy:
                     debug_logger.log_info(
-                        f"[BrowserCaptcha] Personal 使用验证码代理池: {pooled_proxy}"
+                        "[BrowserCaptcha] Personal 使用验证码代理池: "
+                        f"{_redact_proxy_url(pooled_proxy)}"
                     )
                     return _parse_proxy_url(pooled_proxy)
             if getattr(captcha_cfg, "browser_proxy_enabled", False) and getattr(
@@ -9206,7 +9219,8 @@ class BrowserCaptchaService:
                 url = str(getattr(captcha_cfg, "browser_proxy_url", "") or "").strip()
                 if url:
                     debug_logger.log_info(
-                        f"[BrowserCaptcha] Personal 使用验证码代理: {url}"
+                        "[BrowserCaptcha] Personal 使用验证码代理: "
+                        f"{_redact_proxy_url(url)}"
                     )
                     return _parse_proxy_url(url)
         except Exception as e:
@@ -9222,14 +9236,16 @@ class BrowserCaptchaService:
             if proxy_cfg and proxy_cfg.enabled and proxy_pool_candidates:
                 pooled_proxy = proxy_pool_candidates[0]
                 debug_logger.log_info(
-                    f"[BrowserCaptcha] Personal 回退使用请求代理池: {pooled_proxy}"
+                    "[BrowserCaptcha] Personal 回退使用请求代理池: "
+                    f"{_redact_proxy_url(pooled_proxy)}"
                 )
                 return _parse_proxy_url(pooled_proxy)
             if proxy_cfg and proxy_cfg.enabled and proxy_cfg.proxy_url:
                 url = proxy_cfg.proxy_url.strip()
                 if url:
                     debug_logger.log_info(
-                        f"[BrowserCaptcha] Personal 回退使用请求代理: {url}"
+                        "[BrowserCaptcha] Personal 回退使用请求代理: "
+                        f"{_redact_proxy_url(url)}"
                     )
                     return _parse_proxy_url(url)
         except Exception as e:
@@ -9246,7 +9262,8 @@ class BrowserCaptchaService:
             ):
                 continue
             debug_logger.log_info(
-                f"[BrowserCaptcha] Personal 自动接管本机可用代理: {candidate_url}"
+                "[BrowserCaptcha] Personal 自动接管本机可用代理: "
+                f"{_redact_proxy_url(candidate_url)}"
             )
             return protocol, host, port, username, password
 
@@ -10118,9 +10135,14 @@ class BrowserCaptchaService:
                             proxy_server_arg = (
                                 f"--proxy-server={protocol}://{host}:{port}"
                             )
-                        self._proxy_url = f"{protocol}://{host}:{port}"
+                        # Chrome uses the proxy argument/auth extension above, while
+                        # Flow requests use curl_cffi and therefore need credentials.
+                        self._proxy_url = _compose_proxy_url(
+                            protocol, host, port, username, password
+                        )
                         debug_logger.log_info(
-                            f"[BrowserCaptcha] Personal 浏览器代理: {self._proxy_url}"
+                            "[BrowserCaptcha] Personal 浏览器代理: "
+                            f"{_redact_proxy_url(self._proxy_url)}"
                         )
 
                     browser_args = _build_personal_browser_args(

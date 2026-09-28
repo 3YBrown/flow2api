@@ -8,7 +8,9 @@ from src.services.browser_captcha_personal import (
     BrowserCaptchaService,
     ResidentTabInfo,
     _PersonalBrowserPoolService,
+    _compose_proxy_url,
     _patch_nodriver_connection_instance,
+    _redact_proxy_url,
 )
 
 
@@ -73,6 +75,17 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.service = BrowserCaptchaService()
 
+    def test_authenticated_proxy_url_is_preserved_for_flow_requests(self):
+        proxy_url = _compose_proxy_url(
+            "http", "proxy.example.com", "8080", "user", "password"
+        )
+
+        self.assertEqual(proxy_url, "http://user:password@proxy.example.com:8080")
+        self.assertEqual(
+            _redact_proxy_url(proxy_url),
+            "http://***:***@proxy.example.com:8080",
+        )
+
     @staticmethod
     def _make_remote_object_result(token: str):
         return types.SimpleNamespace(
@@ -117,6 +130,55 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNone(resident_info)
+
+    async def test_load_token_cookie_reads_google_cookies_field(self):
+        self.service.db = types.SimpleNamespace(
+            get_token=AsyncMock(
+                return_value=types.SimpleNamespace(
+                    google_cookies="OSID=flow-cookie; SID=google-cookie"
+                )
+            )
+        )
+
+        cookie_text = await self.service._load_token_cookie(7)
+
+        self.assertEqual(cookie_text, "OSID=flow-cookie; SID=google-cookie")
+        self.service.db.get_token.assert_awaited_once_with(7)
+
+    async def test_persist_context_cookies_updates_google_cookies_field(self):
+        resident_info = ResidentTabInfo(
+            tab=object(),
+            slot_id="slot-1",
+            token_id=7,
+            browser_context_id="context-1",
+        )
+        self.service.db = types.SimpleNamespace(update_token=AsyncMock())
+        self.service._get_browser_cookies = AsyncMock(
+            return_value=[
+                {
+                    "name": "OSID",
+                    "value": "flow-cookie",
+                    "domain": "flow.google.com",
+                    "path": "/",
+                    "secure": True,
+                }
+            ]
+        )
+        self.service._load_token_cookie = AsyncMock(return_value="SID=google-cookie")
+
+        persisted = await self.service._persist_context_cookies_to_token(
+            resident_info,
+            7,
+            label="unit_test",
+        )
+
+        self.assertTrue(persisted)
+        self.service.db.update_token.assert_awaited_once()
+        args, kwargs = self.service.db.update_token.await_args
+        self.assertEqual(args, (7,))
+        self.assertIn("google_cookies", kwargs)
+        self.assertNotIn("cookie", kwargs)
+        self.assertIn("OSID", kwargs["google_cookies"])
 
     async def test_close_clears_resident_tabs_when_warmup_task_attr_missing(self):
         tab = _ClosableFakeTab()

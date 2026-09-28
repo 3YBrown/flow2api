@@ -1270,8 +1270,8 @@ def _apply_current_flow_model_catalog():
                 )
 
     for orientation, ratio, fast_key in (
-        ("landscape", landscape, "veo_3_1_r2v_fast_landscape_ultra_relaxed"),
-        ("portrait", portrait, "veo_3_1_r2v_fast_portrait_ultra_relaxed"),
+        ("landscape", landscape, "veo_3_1_r2v_fast_landscape"),
+        ("portrait", portrait, "veo_3_1_r2v_fast_portrait"),
     ):
         register(
             f"veo-3.1-fast-r2v-8s-{orientation}",

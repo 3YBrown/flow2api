@@ -41,6 +41,14 @@ class VeoLiteModelResolverTests(unittest.TestCase):
             MODEL_CONFIG["omni-1.1-flash-4s-landscape"]["model_key"],
             "abra_t2v_4s",
         )
+        self.assertEqual(
+            MODEL_CONFIG["veo-3.1-fast-r2v-8s-landscape"]["model_key"],
+            "veo_3_1_r2v_fast_landscape",
+        )
+        self.assertEqual(
+            MODEL_CONFIG["veo-3.1-fast-r2v-8s-portrait"]["model_key"],
+            "veo_3_1_r2v_fast_portrait",
+        )
 
     def test_resolve_t2v_lite_alias_to_portrait_variant(self):
         request = types.SimpleNamespace(
