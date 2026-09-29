@@ -1438,12 +1438,14 @@ class GenerationHandler:
             str(operation.get("projectId") or video_info.get("projectId") or "").strip()
             or None
         )
+        # as29s indexes by generation operation id, not mediaName; the two are
+        # distinct UUIDs and the wrong one comes back as code=[5] (NOT_FOUND).
         media_name = (
-            operation.get("mediaName")
-            or video_info.get("mediaName")
-            or video_info.get("mediaGenerationId")
+            video_info.get("mediaGenerationId")
             or operation.get("name")
             or (operation.get("operation") or {}).get("name")
+            or operation.get("mediaName")
+            or video_info.get("mediaName")
         )
 
         video_url = ""
