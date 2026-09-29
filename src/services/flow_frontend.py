@@ -189,29 +189,17 @@ class FlowFrontendMixin:
         reference_media_ids = [item for item in reference_media_ids if item]
         client_context = self._frontend_project_context(project_id, recaptcha_token)
         seed = random.randint(1, 2147483647)
-        generation_settings = json.dumps(
-            {
-                "imageModelKey": model_name,
-                "aspectRatio": self._map_frontend_image_aspect_ratio(aspect_ratio),
-                "seed": seed,
-                "count": 1,
-                "structuredPrompt": {"parts": [{"text": prompt}]},
-                "referenceImageMediaIds": reference_media_ids,
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
         request: List[Any] = [
             None,
             None,
-            [[1, item] for item in reference_media_ids] or None,
+            [[media_id, None, None, None, 1] for media_id in reference_media_ids] or None,
             seed,
             self._map_frontend_image_aspect_ratio(aspect_ratio),
             model_name,
             None,
             client_context,
             [[[prompt]]],
-            generation_settings if reference_media_ids else None,
+            None,
             None,
             None,
             None,
