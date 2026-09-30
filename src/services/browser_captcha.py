@@ -30,7 +30,7 @@ from ..core.browser_runtime_status import (
     progress_runtime_prepare,
 )
 from ..core.config import config
-from .browser_cookie_utils import build_cookie_signature
+from .browser_cookie_utils import build_browser_cookie_targets, build_cookie_signature
 
 
 # ==================== Docker 环境检测 ====================
@@ -512,6 +512,9 @@ class TokenBrowser:
         self._consecutive_browser_failures = 0
         self._solve_inflight = 0
         self._last_idle_since = time.monotonic()
+        # harvest 模式状态：页面原生 StreamChat 请求体与会话 id
+        self._harvest_streamchat_post: Optional[str] = None
+        self._last_harvest_session_id: Optional[str] = None
         self._refresh_browser_profile()
 
     def _refresh_browser_profile(self):
@@ -1183,6 +1186,18 @@ class TokenBrowser:
         return normalized if normalized > 0 else None
 
     @classmethod
+    def _build_google_cookie_targets(cls, cookie_storage: str) -> List[Dict[str, Any]]:
+        """按浏览器 Cookie 作用域展开登录态，兼容 JSON 与 Header 格式。"""
+        return build_browser_cookie_targets(
+            cookie_storage,
+            default_url="https://flow.google.com/",
+            fallback_urls=[
+                "https://flow.google.com/",
+                "https://www.google.com/",
+            ],
+        )
+
+    @classmethod
     def _build_token_session_cookie_targets(
         cls, session_token: str
     ) -> List[Dict[str, Any]]:
@@ -1206,10 +1221,10 @@ class TokenBrowser:
 
     async def _load_token_session_binding(
         self, token_id: Optional[int]
-    ) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    ) -> tuple[Optional[int], Optional[str], Optional[str], Optional[str]]:
         token_key = self._normalize_token_key(token_id)
         if token_key is None or not self.db:
-            return token_key, None, None
+            return token_key, None, None, None
 
         try:
             token = await self.db.get_token(token_key)
@@ -1217,17 +1232,27 @@ class TokenBrowser:
             debug_logger.log_warning(
                 f"[BrowserCaptcha] Token-{self.token_id} 读取 token({token_key}) Session Token 失败: {e}"
             )
-            return token_key, None, None
+            return token_key, None, None, None
 
         session_token = str(getattr(token, "st", "") or "").strip() if token else ""
-        if not session_token:
-            return token_key, None, None
-
-        cookie_signature = (
-            build_cookie_signature(f"__Secure-next-auth.session-token={session_token}")
-            or hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+        google_cookies = (
+            str(getattr(token, "google_cookies", "") or "").strip() if token else ""
         )
-        return token_key, session_token, cookie_signature
+
+        # 优先以 google_cookies 计算绑定指纹：新版 flow.google.com 依赖
+        # Google 账号 cookies 维持登录态，st 仅作为旧数据的回退
+        if google_cookies:
+            cookie_signature = build_cookie_signature(
+                google_cookies
+            ) or hashlib.sha256(google_cookies.encode("utf-8")).hexdigest()
+        elif session_token:
+            cookie_signature = (
+                build_cookie_signature(f"__Secure-next-auth.session-token={session_token}")
+                or hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+            )
+        else:
+            cookie_signature = None
+        return token_key, session_token, google_cookies, cookie_signature
 
     async def _ensure_shared_token_binding(
         self, context, token_id: Optional[int]
@@ -1235,6 +1260,7 @@ class TokenBrowser:
         (
             token_key,
             session_token,
+            google_cookies,
             cookie_signature,
         ) = await self._load_token_session_binding(token_id)
 
@@ -1243,9 +1269,9 @@ class TokenBrowser:
             self._shared_bound_cookie_signature = None
             return True
 
-        if not session_token or not cookie_signature:
+        if not (google_cookies or session_token) or not cookie_signature:
             debug_logger.log_warning(
-                f"[BrowserCaptcha] Token-{self.token_id} 缺少可用的 Session Token，无法绑定账号态 (token_id={token_key})"
+                f"[BrowserCaptcha] Token-{self.token_id} 缺少可用的登录态凭据，无法绑定账号态 (token_id={token_key})"
             )
             return False
 
@@ -1255,10 +1281,13 @@ class TokenBrowser:
         ):
             return True
 
-        browser_cookies = self._build_token_session_cookie_targets(session_token)
+        if google_cookies:
+            browser_cookies = self._build_google_cookie_targets(google_cookies)
+        else:
+            browser_cookies = self._build_token_session_cookie_targets(session_token)
         if not browser_cookies:
             debug_logger.log_warning(
-                f"[BrowserCaptcha] Token-{self.token_id} 构造 Session Token cookies 失败 (token_id={token_key})"
+                f"[BrowserCaptcha] Token-{self.token_id} 构造登录态 cookies 失败 (token_id={token_key})"
             )
             return False
 
@@ -1288,7 +1317,13 @@ class TokenBrowser:
         *,
         context_label: str = "",
     ) -> bool:
-        """打开真实 Flow 页面并完成页面预热。"""
+        """打开真实 Flow 页面并完成页面预热。
+
+        页面级注册 route：捕获页面自身发出的 StreamChat 请求（harvest
+        打码数据源，见 _execute_captcha），其余请求一律直通，不干预页面
+        原生加载行为。route 挂在 page 上，页面关闭后自动清理，不影响
+        共享 context。
+        """
         primary_host = (
             "https://www.recaptcha.net"
             if self._browser_proxy_active
@@ -1299,7 +1334,39 @@ class TokenBrowser:
             if primary_host == "https://www.recaptcha.net"
             else "https://www.recaptcha.net"
         )
-        page_urls = [self._build_flow_project_url(project_id), LABS_URL]
+
+        async def _harvest_stream_route(route):
+            try:
+                request = route.request
+                if (
+                    self._harvest_streamchat_post is None
+                    and request.method == "POST"
+                    and "StreamChat" in request.url
+                ):
+                    self._harvest_streamchat_post = request.post_data or ""
+                    await route.abort()
+                    return
+                await route.continue_()
+            except Exception:
+                await route.continue_()
+
+        try:
+            await page.route(
+                # 注意：Playwright glob 中单个 * 不跨越路径分隔符，
+                # StreamChat 的路径有多层目录（/_/AiSandboxAngularFrontend/...），
+                # 必须用 ** 才能匹配 flow.google.com 下的全部子路径。
+                "https://flow.google.com/**", _harvest_stream_route
+            )
+        except Exception as route_error:
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} harvest route 注册失败: "
+                f"{type(route_error).__name__}: {str(route_error)[:150]}"
+            )
+
+        page_urls = [
+            self._build_flow_project_url(project_id),
+            "https://flow.google.com/about",
+        ]
         label = f"{context_label} " if context_label else ""
 
         loaded = False
@@ -2063,8 +2130,25 @@ class TokenBrowser:
     async def _execute_captcha(
         self, context, project_id: str, website_key: str, action: str
     ) -> Optional[str]:
-        """在给定 context 中执行打码逻辑"""
+        """通过页面原生提交流程获取 reCAPTCHA token（harvest 模式）。
+
+        新版 flow.google.com 的 reCAPTCHA Enterprise 会把页面外部调用
+        （page.evaluate / 扩展上下文）标记为 extension_hijack_detected，
+        这类 token 会被生成接口以 UNUSUAL_ACTIVITY 拒绝。因此不再直接调用
+        grecaptcha.enterprise.execute，而是驱动页面自身提交一次生成：
+        1. 打开项目页并处理引导弹窗；
+        2. 在 ProseMirror 输入框输入占位提示词并点击 Start generation，
+           页面在自己的调用上下文中 execute 出无标记 token；
+        3. route 拦截 StreamChat 请求，提取 token 与会话 id 后 abort，
+           请求不会发往服务端，token 保持未消费状态供主程序提交使用。
+        """
         page = None
+        self._harvest_streamchat_post = None
+        self._last_harvest_session_id = None
+        debug_logger.log_info(
+            f"[BrowserCaptcha] Token-{self.token_id} harvest 开始: "
+            f"project={project_id} action={action}"
+        )
         try:
             page = await context.new_page()
             await self._apply_browser_environment_patch(page, label="captcha_page")
@@ -2079,36 +2163,20 @@ class TokenBrowser:
                 context_label="打码",
             )
             if not ready:
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] Token-{self.token_id} harvest 页面未就绪: "
+                    f"url={page.url[:80]}"
+                )
                 return None
 
-            token = await asyncio.wait_for(
-                page.evaluate(
-                    f"""
-                    (actionName) => {{
-                        return new Promise((resolve, reject) => {{
-                            const timeout = setTimeout(() => reject(new Error('timeout')), 25000);
-                            grecaptcha.enterprise.execute('{website_key}', {{action: actionName}})
-                                .then(t => {{ clearTimeout(timeout); resolve(t); }})
-                                .catch(e => {{ clearTimeout(timeout); reject(e); }});
-                        }});
-                    }}
-                """,
-                    action,
-                ),
-                timeout=30,
+            harvest_result = await asyncio.wait_for(
+                self._harvest_token_via_ui_submit(page),
+                timeout=120,
             )
-
-            # 额外等待几秒，确保 enterprise 请求链路完全稳定
-            post_wait_seconds = float(
-                getattr(config, "browser_recaptcha_settle_seconds", 3) or 3
-            )
-            if post_wait_seconds > 0:
-                debug_logger.log_info(
-                    f"[BrowserCaptcha] Token-{self.token_id} token已获取，额外等待 {post_wait_seconds:.1f}s 后返回"
-                )
-                await asyncio.sleep(post_wait_seconds)
-
-            return token
+            if not harvest_result or not harvest_result.get("token"):
+                return None
+            self._last_harvest_session_id = harvest_result.get("session_id")
+            return harvest_result.get("token")
         except Exception as e:
             msg = f"{type(e).__name__}: {str(e)}"
             debug_logger.log_warning(
@@ -2121,6 +2189,204 @@ class TokenBrowser:
                     await page.close()
                 except:
                     pass
+
+    HARVEST_PROMPT_POOL = (
+        "a red apple on a wooden table",
+        "a blue ceramic vase with sunflowers",
+        "a cozy mountain cabin in snow",
+        "a sailboat on a calm lake at sunrise",
+        "a hummingbird hovering near a red flower",
+    )
+
+    async def _dismiss_flow_overlays(self, page, rounds: int = 8) -> None:
+        """关闭项目页引导弹窗（Next/Continue 等），必要时移除无按钮的遮罩。"""
+        for _ in range(rounds):
+            clicked = False
+            for label in (
+                "Next",
+                "Continue",
+                "Start",
+                "Got it",
+                "Close",
+                "Skip",
+                "Not now",
+                "Agree",
+                "Accept",
+            ):
+                button = page.locator(
+                    f".cdk-overlay-container button:has-text('{label}')"
+                ).first
+                try:
+                    if await button.count() and await button.is_visible():
+                        await button.click(timeout=2500)
+                        debug_logger.log_info(
+                            f"[BrowserCaptcha] Token-{self.token_id} 关闭弹窗: {label}"
+                        )
+                        clicked = True
+                        await page.wait_for_timeout(1600)
+                        break
+                except Exception:
+                    continue
+            if clicked:
+                continue
+            try:
+                if await page.locator(".cdk-overlay-backdrop").count():
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(800)
+                    if await page.locator(".cdk-overlay-backdrop").count():
+                        await page.evaluate(
+                            "() => document.querySelectorAll('.cdk-overlay-backdrop')"
+                            ".forEach(e => e.remove())"
+                        )
+                        await page.wait_for_timeout(600)
+                    continue
+            except Exception:
+                pass
+            return
+
+    async def _harvest_token_via_ui_submit(self, page) -> Optional[Dict[str, Any]]:
+        """驱动页面 UI 提交一次生成并从被拦截的请求中提取 token / 会话 id。
+
+        全新浏览器 context 没有本地引导状态，项目页可能反复弹出多步
+        引导弹窗（Previous/Continue 等）吞掉编辑器内容，因此输入与提交
+        都需要校验并重试，提交后在等待窗口内持续关闭后出现的弹窗。
+        """
+        await self._dismiss_flow_overlays(page)
+        await page.wait_for_timeout(2500)
+
+        editor = page.locator(".ProseMirror").first
+        try:
+            await editor.wait_for(timeout=30000)
+        except Exception as e:
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} 未找到 ProseMirror 输入框: "
+                f"{type(e).__name__}: {str(e)[:150]} url={page.url[:80]}"
+            )
+            return None
+
+        harvest_prompt = random.choice(self.HARVEST_PROMPT_POOL)
+        prompt_head = harvest_prompt[:24]
+        submitted = False
+        for round_index in range(4):
+            try:
+                current_text = await editor.inner_text()
+            except Exception:
+                current_text = ""
+            if prompt_head not in current_text:
+                try:
+                    await editor.click(timeout=4000)
+                    await page.keyboard.press("Control+a")
+                except Exception:
+                    await self._dismiss_flow_overlays(page, rounds=4)
+                    await page.wait_for_timeout(800)
+                    continue
+                try:
+                    await editor.type(harvest_prompt, delay=30)
+                except Exception as e:
+                    debug_logger.log_warning(
+                        f"[BrowserCaptcha] Token-{self.token_id} 输入提示词失败: "
+                        f"{type(e).__name__}: {str(e)[:150]}"
+                    )
+                    return None
+                # 输入过程中可能再次弹出引导弹窗，关闭后确认文本仍在
+                await self._dismiss_flow_overlays(page, rounds=2)
+                try:
+                    current_text = await editor.inner_text()
+                except Exception:
+                    current_text = ""
+                debug_logger.log_info(
+                    f"[BrowserCaptcha] Token-{self.token_id} harvest 第{round_index + 1}轮"
+                    f"输入确认: {'ok' if prompt_head in current_text else 'lost'}"
+                )
+                if prompt_head not in current_text:
+                    continue
+
+            submit_button = page.locator(
+                "button[aria-label='Start generation']"
+            ).first
+            try:
+                await submit_button.click(timeout=8000)
+                submitted = True
+            except Exception as e:
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] Token-{self.token_id} 点击 Start generation 失败"
+                    f"（第{round_index + 1}轮）: {type(e).__name__}: {str(e)[:150]}"
+                )
+                await self._dismiss_flow_overlays(page, rounds=4)
+                continue
+
+            for tick in range(30):
+                if self._harvest_streamchat_post:
+                    break
+                await page.wait_for_timeout(1000)
+                if tick and tick % 5 == 0:
+                    await self._dismiss_flow_overlays(page, rounds=1)
+            if self._harvest_streamchat_post:
+                break
+            debug_logger.log_info(
+                f"[BrowserCaptcha] Token-{self.token_id} harvest 第{round_index + 1}轮"
+                "未捕获到请求，重试"
+            )
+
+        post_data = self._harvest_streamchat_post
+        debug_logger.log_info(
+            f"[BrowserCaptcha] Token-{self.token_id} harvest 捕获: "
+            f"{'len=' + str(len(post_data)) if post_data else 'NONE'} submitted={submitted}"
+        )
+        if not post_data:
+            try:
+                dbg = await page.evaluate(
+                    """() => ({
+                        url: location.href,
+                        editorText: (document.querySelector('.ProseMirror')||{}).innerText?.slice(0,60),
+                        submitDisabled: (document.querySelector("button[aria-label='Start generation']")||{}).disabled,
+                        overlayButtons: [...document.querySelectorAll('.cdk-overlay-container button')].map(b => b.innerText.slice(0,20)).slice(0,5),
+                        generating: !!document.querySelector('stop-generation, [aria-label*=Stop]'),
+                    })"""
+                )
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] Token-{self.token_id} 未捕获页面 StreamChat 请求，"
+                    f"页面状态: {dbg}"
+                )
+            except Exception:
+                pass
+        if not post_data:
+            return None
+
+        try:
+            decoded = unquote(post_data)
+            token_match = re.search(
+                r'\[\\?"(0cAFcW[A-Za-z0-9_\-]+)\\?"', decoded
+            )
+            session_id = None
+            freq_raw = decoded[len("f.req="):]
+            amp_index = freq_raw.find("&")
+            outer = json.loads(
+                freq_raw[:amp_index] if amp_index >= 0 else freq_raw
+            )
+            inner = json.loads(outer[1])
+            if isinstance(inner, list) and inner:
+                session_id = str(inner[0] or "") or None
+        except Exception as e:
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} 解析 StreamChat 请求体失败: "
+                f"{type(e).__name__}: {str(e)[:150]}"
+            )
+            return None
+        if not token_match:
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] Token-{self.token_id} StreamChat 请求体中未找到 token"
+            )
+            return None
+        debug_logger.log_info(
+            f"[BrowserCaptcha] Token-{self.token_id} harvest 成功: "
+            f"token_len={len(token_match.group(1))} session={session_id or 'n/a'}"
+        )
+        return {"token": token_match.group(1), "session_id": session_id}
+
+    def get_last_harvest_session_id(self) -> Optional[str]:
+        """返回最近一次 harvest 得到的 Flow 会话 id（供主程序提交复用）。"""
+        return self._last_harvest_session_id
 
     async def _execute_custom_captcha(
         self,
@@ -2434,10 +2700,25 @@ class TokenBrowser:
             return True
         except Exception as inject_error:
             debug_logger.log_warning(
-                f"[BrowserCaptcha] Token-{self.token_id} {label}grecaptcha 最终未就绪: "
-                f"{type(inject_error).__name__}: {str(inject_error)[:200]}"
+                f"[BrowserCaptcha] Token-{self.token_id} {label}页面内注入失败"
+                f"（新版 CSP 会拒绝动态 script），改用 Playwright add_script_tag: "
+                f"{type(inject_error).__name__}: {str(inject_error)[:150]}"
             )
-            return False
+
+        # 最终兜底：Playwright add_script_tag（配合 CSP 剥除 route 生效）
+        for script_host in (primary_host, secondary_host):
+            try:
+                await page.add_script_tag(
+                    url=f"{script_host}/recaptcha/enterprise.js?render={website_key}"
+                )
+                await page.wait_for_function(wait_expression, timeout=timeout_ms)
+                return True
+            except Exception as tag_error:
+                debug_logger.log_warning(
+                    f"[BrowserCaptcha] Token-{self.token_id} {label}add_script_tag({script_host}) 失败: "
+                    f"{type(tag_error).__name__}: {str(tag_error)[:150]}"
+                )
+        return False
 
     @staticmethod
     def _inject_recaptcha_token(payload: Any, token: str):
@@ -2676,7 +2957,7 @@ class TokenBrowser:
                             debug_logger.log_info(
                                 f"[BrowserCaptcha] Token-{self.token_id} token acquired ({(time.time()-start_ts)*1000:.0f}ms, launches={self._shared_launch_count}, reuse={self._shared_reuse_count})"
                             )
-                            return token, None
+                            return token, self._last_harvest_session_id
 
                         self._error_count += 1
                         self._consecutive_browser_failures += 1
@@ -2885,7 +3166,6 @@ class BrowserCaptchaService:
         # ?????? _load_browser_count ???????
         self._token_semaphore = None
         self._idle_reaper_task: Optional[asyncio.Task] = None
-    
     async def _ensure_idle_reaper(self):
         if self._idle_reaper_task is None or self._idle_reaper_task.done():
             self._idle_reaper_task = asyncio.create_task(self._idle_reaper_loop())
@@ -3158,7 +3438,7 @@ class BrowserCaptchaService:
     
     async def get_token(
         self, project_id: str, action: str = "IMAGE_GENERATION", token_id: int = None
-    ) -> tuple[Optional[str], Union[int, str]]:
+    ) -> tuple[Optional[str], Union[int, str], Optional[Dict[str, Any]]]:
         """获取 reCAPTCHA Token（从共享浏览器池选择 slot）
         
         Args:
@@ -3167,7 +3447,8 @@ class BrowserCaptchaService:
             token_id: 业务 token id（仅用于读取 token 级打码代理）
         
         Returns:
-            (token, browser_ref) 元组，browser_ref 包含 browser_id 与请求级 request_ref
+            (token, browser_ref, fingerprint) 元组。browser_ref 包含 browser_id
+            与请求级 session id，fingerprint 是同一次打码的不可变快照。
         """
         # 检查服务是否可用
         self._check_available()
@@ -3177,6 +3458,7 @@ class BrowserCaptchaService:
         
         token: Optional[str] = None
         request_ref: Optional[str] = None
+        fingerprint: Optional[Dict[str, Any]] = None
 
         # 全局并发限制（如果已配置）
         if self._token_semaphore:
@@ -3191,6 +3473,7 @@ class BrowserCaptchaService:
                         token_proxy_url=token_proxy_url,
                         token_id=token_id,
                     )
+                    fingerprint = browser.get_last_fingerprint() if token else None
                 finally:
                     await self._release_slot_reservation(browser_id)
 
@@ -3200,7 +3483,11 @@ class BrowserCaptchaService:
                 self._stats["gen_fail"] += 1
                 
             self._log_stats()
-            return token, self._compose_browser_ref(browser_id, request_ref)
+            return (
+                token,
+                self._compose_browser_ref(browser_id, request_ref),
+                fingerprint,
+            )
         
         browser_id = await self._select_browser_id(project_id)
         try:
@@ -3212,6 +3499,7 @@ class BrowserCaptchaService:
                 token_proxy_url=token_proxy_url,
                 token_id=token_id,
             )
+            fingerprint = browser.get_last_fingerprint() if token else None
         finally:
             await self._release_slot_reservation(browser_id)
 
@@ -3221,7 +3509,7 @@ class BrowserCaptchaService:
             self._stats["gen_fail"] += 1
             
         self._log_stats()
-        return token, self._compose_browser_ref(browser_id, request_ref)
+        return token, self._compose_browser_ref(browser_id, request_ref), fingerprint
 
     async def get_custom_token(
         self,

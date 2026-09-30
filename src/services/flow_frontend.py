@@ -9,11 +9,18 @@ from urllib.parse import quote, urlencode, urlparse
 
 from curl_cffi.requests import AsyncSession
 
+from ..core.logger import debug_logger
 from .browser_cookie_utils import serialize_cookie_header_for_url
 
 
 class FlowFrontendMixin:
     """Frontend RPC helpers shared by project and media generation flows."""
+
+    STREAM_CHAT_RPC_PATH = (
+        "/_/AiSandboxAngularFrontend/data/"
+        "google.internal.labs.aisandbox.proto.flow.agent.v1."
+        "FlowCreationAgentService/StreamChat"
+    )
 
     @staticmethod
     def _build_flow_frontend_project_page_url(project_id: str) -> str:
@@ -715,6 +722,199 @@ class FlowFrontendMixin:
         if payload is None:
             raise RuntimeError(f"Flow frontend RPC returned no payload: rpc={rpc_id}")
         return payload
+
+    @staticmethod
+    def _extract_stream_chat_at_token(bootstrap_text: str) -> str:
+        """从 bootstrap HTML 提取 WIZ_global_data.SNlM0e（XSRF at token）。"""
+        for pattern in (
+            r'"SNlM0e":"([^"]+)"',
+            r"SNlM0e['\"]?\s*[:=]\s*['\"]([A-Za-z0-9_:\-.]+)['\"]",
+        ):
+            match = re.search(pattern, bootstrap_text)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _build_stream_chat_request(
+        self,
+        *,
+        project_id: str,
+        prompt: str,
+        recaptcha_token: str,
+        session_id: str,
+    ) -> str:
+        """构造 StreamChat f.req（结构复刻自新版前端真实请求）。
+
+        outer = [null, "<inner json>"]
+        inner = [session_id, [[[[prompt]]]],
+                 ["projects/<pid>", null, [token, 1], null, null, 3]]
+        """
+        inner = [
+            str(session_id),
+            [[[[str(prompt)]]]],
+            [f"projects/{project_id}", None, [recaptcha_token, 1], None, None, 3],
+        ]
+        return self._compact_json_dumps(
+            [None, self._compact_json_dumps(inner)]
+        )
+
+    @classmethod
+    def _extract_stream_chat_media_ids(cls, payloads: Any) -> List[str]:
+        """从 StreamChat 响应帧中提取 generate_image 结果的 media_id。
+
+        batchexecute 帧形如 ["wrb.fr", null, "<inner json>"]，业务数据在
+        内层 JSON 字符串里，需要先 json.loads 再递归查找
+        ["media_id", [null, null, "<uuid>"]] 模式。
+        """
+        found: List[str] = []
+
+        def walk(value: Any) -> None:
+            if isinstance(value, list):
+                if (
+                    len(value) == 2
+                    and value[0] == "media_id"
+                    and isinstance(value[1], list)
+                    and len(value[1]) > 2
+                    and cls._is_uuid(value[1][2])
+                ):
+                    found.append(value[1][2])
+                    return
+                for item in value:
+                    walk(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    walk(item)
+
+        for payload in payloads if isinstance(payloads, list) else [payloads]:
+            if isinstance(payload, list):
+                for item in payload:
+                    if (
+                        isinstance(item, list)
+                        and len(item) >= 3
+                        and item[0] == "wrb.fr"
+                        and isinstance(item[2], str)
+                    ):
+                        try:
+                            walk(json.loads(item[2]))
+                        except (TypeError, ValueError):
+                            continue
+            walk(payload)
+        return list(dict.fromkeys(found))
+
+    async def _call_flow_stream_chat(
+        self,
+        *,
+        project_id: str,
+        prompt: str,
+        recaptcha_token: str,
+        session_id: str,
+        cookie_header: str,
+        timeout: int,
+        cookie_storage: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """新版 Flow 图片生成入口：FlowCreationAgentService/StreamChat。"""
+        page_url = f"https://flow.google.com/project/{project_id}"
+        bootstrap_cookie_header = (
+            serialize_cookie_header_for_url(cookie_storage, page_url)
+            if str(cookie_storage or "").strip()
+            else cookie_header
+        )
+        if not bootstrap_cookie_header:
+            raise RuntimeError("Flow StreamChat requires Google session cookies")
+        bootstrap_text = await self._load_flow_frontend_bootstrap(
+            page_url,
+            bootstrap_cookie_header,
+            timeout,
+        )
+        bootloader_match = re.search(
+            r"boq_labs-ai-sandbox-frontend_[A-Za-z0-9_.-]+",
+            bootstrap_text,
+        )
+        session_match = re.search(r'"FdrFJe":"(-?[0-9]+)"', bootstrap_text)
+        if not bootloader_match or not session_match:
+            raise RuntimeError("Flow frontend bootstrap metadata is unavailable")
+        at_token = self._extract_stream_chat_at_token(bootstrap_text)
+        if not at_token:
+            raise RuntimeError("Flow frontend bootstrap XSRF token is unavailable")
+
+        url = (
+            f"https://flow.google.com{self.STREAM_CHAT_RPC_PATH}"
+            f"?bl={quote(bootloader_match.group(0), safe='')}"
+            f"&f.sid={session_match.group(1)}&hl=en"
+            f"&_reqid={random.randint(100000, 999999)}&rt=c"
+        )
+        rpc_cookie_header = (
+            serialize_cookie_header_for_url(cookie_storage, url)
+            if str(cookie_storage or "").strip()
+            else cookie_header
+        )
+        if not rpc_cookie_header:
+            raise RuntimeError("Flow StreamChat requires Google session cookies")
+        headers = {
+            "Accept": "*/*",
+            "Accept-Language": self._get_primary_accept_language(
+                fallback="en-US,en;q=0.9"
+            ),
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "Cookie": rpc_cookie_header,
+            "Origin": "https://flow.google.com",
+            "Referer": "https://flow.google.com/",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "x-client-deadline-ms": "600000",
+            "x-same-domain": "1",
+        }
+        f_request = self._build_stream_chat_request(
+            project_id=project_id,
+            prompt=prompt,
+            recaptcha_token=recaptcha_token,
+            session_id=session_id,
+        )
+        request_body = (
+            "f.req="
+            + quote(f_request, safe="")
+            + "&at="
+            + quote(at_token, safe="")
+        )
+        response_text = await self._make_text_request(
+            method="POST",
+            url=url,
+            headers=headers,
+            raw_body=request_body,
+            timeout=timeout,
+            apply_default_client_headers=False,
+            return_error_response=True,
+            redact_sensitive_logs=True,
+        )
+        frames = self._parse_batchexecute_frames(response_text)
+        error_match = re.search(r"PUBLIC_ERROR_[A-Z_]+", response_text)
+        if error_match:
+            raise RuntimeError(
+                f"Flow StreamChat rejected: error={error_match.group(0)}"
+            )
+        media_ids = self._extract_stream_chat_media_ids(frames)
+        if not media_ids:
+            debug_logger.log_warning(
+                "[StreamChat] response contained no media id "
+                f"(response_chars={len(response_text)}, frames={len(frames)})"
+            )
+        media_urls = list(
+            dict.fromkeys(
+                url
+                for url in re.findall(
+                    r"https://flow-content\.google/(?:image|video)/[^\"\\\s]+",
+                    response_text,
+                )
+            )
+        )
+        return {
+            "frames": frames,
+            "mediaIds": media_ids,
+            "mediaUrls": media_urls,
+            "rawLength": len(response_text),
+            "responseText": response_text,
+        }
 
     @classmethod
     def _extract_flow_project_id(cls, payload: Any) -> str:

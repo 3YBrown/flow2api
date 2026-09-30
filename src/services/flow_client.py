@@ -4562,6 +4562,35 @@ class _FlowClientBase(FlowFrontendMixin):
             log_prefix=log_prefix,
         )
 
+    def _resolve_third_party_captcha_method(self) -> Optional[str]:
+        """返回第一个已配置密钥的第三方打码方式（yescaptcha 优先）。
+
+        SPrCad 等 batchexecute RPC 只接受第三方打码 token；
+        browser/personal harvest 出的 token 会被 UNUSUAL_ACTIVITY 拒绝。
+        """
+        for method, attr in (
+            ("yescaptcha", "yescaptcha_api_key"),
+            ("capmonster", "capmonster_api_key"),
+            ("ezcaptcha", "ezcaptcha_api_key"),
+            ("capsolver", "capsolver_api_key"),
+            ("captcharun", "captcharun_api_key"),
+        ):
+            if str(getattr(config, attr, "") or "").strip():
+                return method
+        return None
+
+    @staticmethod
+    def _extract_browser_captcha_session_id(
+        browser_ref: Optional[Union[int, str]],
+    ) -> Optional[str]:
+        """从 browser 请求句柄提取本次 harvest 对应的 Flow session id。"""
+        if not isinstance(browser_ref, str):
+            return None
+        browser_id, separator, request_ref = browser_ref.strip().partition(":")
+        if not separator or not browser_id.isdigit() or not request_ref:
+            return None
+        return request_ref
+
     def _get_retry_reason(self, error_str: str) -> Optional[str]:
         """判断是否需要重试，返回日志提示内容"""
         error_lower = error_str.lower()
@@ -4569,6 +4598,9 @@ class _FlowClientBase(FlowFrontendMixin):
             return "打码服务资源阻塞"
         if "error_no_slot_available" in error_lower:
             return "打码服务资源不足"
+        if "model_access_denied" in error_lower:
+            # 账号无对应模型权限，重试不会改变结果
+            return None
         if "403" in error_lower:
             return "403错误"
         if "429" in error_lower or "too many requests" in error_lower:
@@ -5017,6 +5049,7 @@ class _FlowClientBase(FlowFrontendMixin):
         action: str = "IMAGE_GENERATION",
         token_id: Optional[int] = None,
         website_url: Optional[str] = None,
+        method_override: Optional[str] = None,
     ) -> tuple[Optional[str], Optional[Union[int, str]]]:
         """获取reCAPTCHA token - 支持多种打码方式
         
@@ -5026,6 +5059,8 @@ class _FlowClientBase(FlowFrontendMixin):
                 - IMAGE_GENERATION: 图片生成和2K/4K图片放大 (默认)
                 - VIDEO_GENERATION: 视频生成和视频放大
             token_id: 当前业务 token id（browser 模式下用于读取 token 级打码代理）
+            method_override: 强制指定打码方式（如 "yescaptcha"）。
+                用于 harvest token 不被目标 RPC 接受的场景（如 SPrCad 放大）。
         
         Returns:
             (token, browser_id) 元组。
@@ -5033,7 +5068,7 @@ class _FlowClientBase(FlowFrontendMixin):
             - remote_browser 模式: browser_id 为远程 session_id
             - 其他模式: browser_id 为 None
         """
-        captcha_method = config.captcha_method
+        captcha_method = method_override or config.captcha_method
         debug_logger.log_info(
             f"[reCAPTCHA] 开始获取 token: method={captcha_method}, project_id={project_id}, action={action}"
         )
@@ -5170,12 +5205,15 @@ class _FlowClientBase(FlowFrontendMixin):
                 from .browser_captcha import BrowserCaptchaService
 
                 service = await BrowserCaptchaService.get_instance(self.db)
-                token, browser_id = await service.get_token(
+                token, browser_id, fingerprint = await service.get_token(
                     project_id, action, token_id=token_id
                 )
-                fingerprint = (
-                    await service.get_fingerprint(browser_id) if token else None
-                )
+                if token and not self._extract_browser_captcha_session_id(
+                    browser_id
+                ):
+                    debug_logger.log_warning(
+                        "[reCAPTCHA Browser] harvest 未返回会话 id，生成请求可能被拒"
+                    )
                 self._set_request_fingerprint(fingerprint if token else None)
                 return token, browser_id
             except RuntimeError as e:
@@ -5234,8 +5272,9 @@ class _FlowClientBase(FlowFrontendMixin):
             "ezcaptcha",
             "capsolver",
         ]:
-            proxy_url = None
-            if self.proxy_manager:
+            existing_fingerprint = self.get_request_fingerprint() or {}
+            proxy_url = str(existing_fingerprint.get("proxy_url") or "").strip()
+            if not proxy_url and self.proxy_manager:
                 try:
                     proxy_url = await self.proxy_manager.get_request_proxy_url()
                 except Exception as e:
@@ -5243,16 +5282,20 @@ class _FlowClientBase(FlowFrontendMixin):
                         f"[reCAPTCHA] Failed to get proxy for API captcha: {e}"
                     )
 
-            api_captcha_ua = self._generate_user_agent(
+            api_captcha_ua = str(
+                existing_fingerprint.get("user_agent") or ""
+            ).strip() or self._generate_user_agent(
                 str(token_id or project_id or captcha_method)
             )
-            self._set_request_fingerprint(
+            next_fingerprint = dict(existing_fingerprint)
+            next_fingerprint.update(
                 self._build_fingerprint_from_user_agent(
                     api_captcha_ua,
                     accept_language=self._get_primary_accept_language(),
                     proxy_url=proxy_url,
                 )
             )
+            self._set_request_fingerprint(next_fingerprint)
             captcha_website_url = str(
                 website_url or ""
             ).strip() or self._build_flow_project_page_url(project_id)

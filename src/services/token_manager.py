@@ -26,6 +26,7 @@ class TokenManager:
         self._project_locks: dict[int, asyncio.Lock] = {}
         self._refresh_futures: dict[int, asyncio.Task] = {}
         self._at_validation_cache: dict[int, float] = {}
+        self._last_at_refresh_error: dict[int, str] = {}
         self._protocol_refresher_task: Optional[asyncio.Task] = None
 
     async def _get_token_lock(
@@ -121,6 +122,53 @@ class TokenManager:
             self._clear_at_validation_cache(token_id)
             return False
         return True
+
+    def _is_transient_network_failure(self, reason: Optional[str]) -> bool:
+        """判断刷新失败原因是否为网络/代理类瞬时错误。"""
+        text = str(reason or "").strip()
+        if not text:
+            return False
+        lowered = text.lower()
+        try:
+            if self.flow_client._is_proxy_connection_error(Exception(text)):
+                return True
+        except Exception:
+            pass
+        try:
+            if self.flow_client._is_retryable_network_error(lowered):
+                return True
+        except Exception:
+            pass
+        transient_keywords = (
+            "timed out",
+            "timeout",
+            "connection",
+            "curl: (",
+            "proxy",
+            "network",
+            "ssl",
+            "tls",
+            "eof",
+            "getaddrinfo",
+            "name or service not known",
+            "temporarily unavailable",
+            "502",
+            "503",
+            "504",
+        )
+        return any(keyword in lowered for keyword in transient_keywords)
+
+    def _all_refresh_failures_transient(self, reasons: List[str]) -> bool:
+        """仅当所有有效失败原因均为网络类瞬时错误时返回 True。"""
+        meaningful: List[str] = []
+        for reason in reasons:
+            text = str(reason or "").strip()
+            if not text or text.lower() == "success":
+                continue
+            meaningful.append(text)
+        if not meaningful:
+            return False
+        return all(self._is_transient_network_failure(text) for text in meaningful)
 
     async def _flow_call_for_token(self, token: Token, call):
         previous_fingerprint = self.flow_client.get_request_fingerprint()
@@ -685,6 +733,25 @@ class TokenManager:
                 if result:
                     return True
 
+            failure_reasons: List[str] = [self._last_at_refresh_error.get(token_id, "")]
+            try:
+                latest_snapshot = await self.db.get_token(token_id)
+                if latest_snapshot is not None:
+                    failure_reasons.append(
+                        str(latest_snapshot.last_st_refresh_result or "")
+                    )
+            except Exception:
+                pass
+            finally:
+                self._last_at_refresh_error.pop(token_id, None)
+
+            if self._all_refresh_failures_transient(failure_reasons):
+                debug_logger.log_warning(
+                    f"[AT_REFRESH] Token {token_id}: refresh failed due to transient "
+                    f"network errors, keep token active - {failure_reasons}"
+                )
+                return False
+
             debug_logger.log_error(
                 f"[AT_REFRESH] Token {token_id}: all refresh attempts failed, disabling token"
             )
@@ -767,6 +834,7 @@ class TokenManager:
                 debug_logger.log_info(
                     f"[AT_REFRESH] Token {token_id}: AT 验证成功（余额: {credits_result.get('credits', 0)}）"
                 )
+                self._last_at_refresh_error.pop(token_id, None)
                 record_token_refresh("at", "success")
                 return True
             except Exception as verify_err:
@@ -776,6 +844,9 @@ class TokenManager:
                     debug_logger.log_warning(
                         f"[AT_REFRESH] Token {token_id}: AT 验证失败 (401)，ST 可能已过期"
                     )
+                    self._last_at_refresh_error[token_id] = (
+                        f"AT 验证失败 (401 UNAUTHENTICATED): {error_msg}"
+                    )
                     record_token_refresh("at", "failure")
                     return False
                 else:
@@ -783,10 +854,12 @@ class TokenManager:
                     debug_logger.log_warning(
                         f"[AT_REFRESH] Token {token_id}: AT 验证时发生非认证错误: {error_msg}"
                     )
+                    self._last_at_refresh_error.pop(token_id, None)
                     record_token_refresh("at", "success")
                     return True
 
         except Exception as e:
+            self._last_at_refresh_error[token_id] = str(e)
             debug_logger.log_error(
                 f"[AT_REFRESH] Token {token_id}: AT刷新失败 - {str(e)}"
             )
@@ -810,10 +883,22 @@ class TokenManager:
         try:
             from .protocol_login import protocol_loginer
 
+            proxy_url = (getattr(token, "proxy_url", "") or "").strip()
+            if not proxy_url:
+                proxy_manager = getattr(self.flow_client, "proxy_manager", None)
+                if proxy_manager is not None:
+                    try:
+                        fallback_proxy = await proxy_manager.get_request_proxy_url()
+                        proxy_url = (fallback_proxy or "").strip()
+                    except Exception as e:
+                        debug_logger.log_warning(
+                            f"[ST_REFRESH] Token {token_id}: 获取全局请求代理失败 - {e}"
+                        )
+
             debug_logger.log_info(f"[ST_REFRESH] Token {token_id}: 尝试协议刷新 ST...")
             login_result = await protocol_loginer.login(
                 token.google_cookies,
-                proxy=(getattr(token, "proxy_url", "") or None),
+                proxy=proxy_url or None,
                 email=(getattr(token, "login_account", "") or token.email or None),
             )
             if login_result.get("success") and login_result.get("session_token"):

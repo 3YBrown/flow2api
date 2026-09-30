@@ -1170,7 +1170,8 @@ def _apply_current_flow_model_catalog():
             "allow_tier_upgrade": False,
         }
 
-    # Veo 3.1 Lite.
+    # Veo 3.1 Lite. 实测 2026-09：Pro 账号对 lite 全系（含 *_low_priority 变体）
+    # 均返回 MODEL_ACCESS_DENIED，veo 系需更高级别订阅；key 保持上游默认值。
     for seconds, key in (
         (4, "veo_3_1_t2v_lite_4s"),
         (6, "veo_3_1_t2v_lite_6s"),
@@ -1448,6 +1449,11 @@ class GenerationHandler:
 
         video_url = ""
         if media_name:
+            # jwpduf 轮询响应可能已携带带签名的 flow-content 直链（与图片路径一致），
+            # 直接复用；仅在没有直链时才通过 as29s 换取（部分模型如 abra 的
+            # media 名不被 as29s 接受，会返回 code=[5]）。
+            video_url = str(video_info.get("fifeUrl") or "").strip()
+        if not video_url and media_name:
             video_url = (
                 await self.flow_client.get_media_url_redirect(
                     getattr(token, "st", ""),
@@ -2358,6 +2364,15 @@ class GenerationHandler:
                     image_trace["upsample_ms"] = int(
                         (time.time() - upsample_started_at) * 1000
                     )
+                # 放大失败回退原图时记录失败标记，便于调用方感知实际交付分辨率
+                if upsample_resolution and media_id:
+                    response_state.setdefault("generated_assets", {})[
+                        "upscaled_image"
+                    ] = {
+                        "resolution": resolution_name,
+                        "failed": True,
+                        "delivery_mode": "origin_fallback",
+                    }
 
             local_url = image_url
             cache_started_at = time.time()
@@ -2399,11 +2414,18 @@ class GenerationHandler:
             # 返回结果
             # 存储URL用于日志记录
             response_state["url"] = local_url
-            response_state["generated_assets"] = {
+            final_assets = {
                 "type": "image",
                 "origin_image_url": image_url,
                 "final_image_url": local_url,
             }
+            # 保留放大失败回退标记（如有），便于调用方感知实际交付分辨率
+            upscaled_marker = (response_state.get("generated_assets") or {}).get(
+                "upscaled_image"
+            )
+            if upscaled_marker:
+                final_assets["upscaled_image"] = upscaled_marker
+            response_state["generated_assets"] = final_assets
             self._mark_generation_succeeded(generation_result)
 
             if stream:
