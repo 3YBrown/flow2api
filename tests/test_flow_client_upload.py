@@ -40,6 +40,32 @@ class FlowClientUploadImageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["argument"][0][10], ["captcha-token", 1])
         self.assertEqual(request["argument"][2], "image/jpeg")
 
+    async def test_upload_argument_matches_current_frontend_envelope(self):
+        client = FlowClient(proxy_manager=None)
+        client._get_recaptcha_token = AsyncMock(return_value=("captcha-token", None))
+        client._call_flow_frontend_rpc = AsyncMock(
+            return_value=[[MEDIA_ID, PROJECT_ID, f"https://flow-content.google/image/{MEDIA_ID}?Signature=1"]]
+        )
+        client._make_request = AsyncMock()
+
+        await client.upload_image(
+            at="frontend-cookie",
+            image_bytes=JPEG_BYTES,
+            aspect_ratio="IMAGE_ASPECT_RATIO_LANDSCAPE",
+            project_id=PROJECT_ID,
+            google_cookies="SID=session-cookie",
+        )
+
+        argument = client._call_flow_frontend_rpc.await_args.kwargs["argument"]
+        self.assertEqual(len(argument), 12)
+        # slot 3 is an integer enum; sending a bool makes the RPC reject with code=[3]
+        self.assertEqual(argument[3], 1)
+        self.assertIsInstance(argument[3], int)
+        self.assertIsNone(argument[7])
+        self.assertIsNone(argument[9])
+        for slot in (10, 11):
+            self.assertRegex(argument[slot], r"^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$")
+
     async def test_upload_requires_project_id(self):
         client = FlowClient(proxy_manager=None)
 
