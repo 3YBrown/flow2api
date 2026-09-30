@@ -27,6 +27,20 @@
 </tr>
 </table>
 
+<table>
+<tr>
+<td width="180" align="center" valign="middle">
+  <a href="https://useapi.net/docs/articles/google-flow-api-zh?utm_source=flow2api&utm_medium=referral&utm_campaign=flow2api-sponsor">
+    <img src="https://useapi.net/assets/images/sponsor/useapi-banner.png" alt="useapi.net" width="150">
+  </a>
+</td>
+<td valign="top">
+  感谢 <strong>useapi.net</strong> 赞助了本项目！<strong>一个订阅，全部 API</strong>：useapi.net 为你自己的 Google 账号提供托管 API：<strong>Google Flow</strong>（Veo 3.1、带原生音频的 Omni 1.1 Flash、Nano Banana Pro）、<strong>Google Flow Music</strong>（Lyria 3.5 整首歌曲生成，含翻唱、续写、分轨）和 <strong>Gemini Notebook</strong>（NotebookLM）。生成消耗你 Google AI 订阅里的额度，已适配 flow.google.com，reCAPTCHA 服务端处理，无需自己部署。同一订阅还包含 Dreamina、可灵 Kling、PixVerse、海螺 MiniMax、Mureka、Runway 等 API，每月固定 $15。<a href="https://useapi.net/docs/articles/google-flow-api-zh?utm_source=flow2api&utm_medium=referral&utm_campaign=flow2api-sponsor">中文教程</a> · <a href="https://buy.stripe.com/8x2aEX4Bd8Vh9PMg4qeUU03?client_reference_id=flow2api">订阅</a><br><br>
+  Thanks to <strong>useapi.net</strong> for sponsoring this project! <strong>One subscription, every API</strong>: useapi.net runs hosted APIs on your own Google account: <strong>Google Flow</strong> (Veo 3.1, audio-native Omni 1.1 Flash, Nano Banana Pro), <strong>Google Flow Music</strong> (full songs with Lyria 3.5, plus cover, extend and stems) and <strong>Gemini Notebook</strong> (NotebookLM). Generation uses your own Google AI plan, works with flow.google.com, and reCAPTCHA is handled server-side. The same flat $15/month also covers Dreamina, Kling, PixVerse, MiniMax, Mureka, Runway and more. <a href="https://useapi.net/docs/api-google-flow-v1?utm_source=flow2api&utm_medium=referral&utm_campaign=flow2api-sponsor">Docs</a> · <a href="https://buy.stripe.com/8x2aEX4Bd8Vh9PMg4qeUU03?client_reference_id=flow2api">Subscribe</a>
+</td>
+</tr>
+</table>
+
 ## ✨ 核心特性
 
 - 🎨 **文生图** / **图生图**
