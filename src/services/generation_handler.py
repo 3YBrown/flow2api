@@ -1439,28 +1439,29 @@ class GenerationHandler:
             str(operation.get("projectId") or video_info.get("projectId") or "").strip()
             or None
         )
+        media_name = (
+            operation.get("mediaName")
+            or video_info.get("mediaName")
+        )
         # as29s indexes by generation operation id, not mediaName; the two are
         # distinct UUIDs and the wrong one comes back as code=[5] (NOT_FOUND).
-        media_name = (
+        media_generation_id = (
             video_info.get("mediaGenerationId")
             or operation.get("name")
             or (operation.get("operation") or {}).get("name")
-            or operation.get("mediaName")
-            or video_info.get("mediaName")
         )
+        media_lookup_id = media_generation_id or media_name
 
-        video_url = ""
-        if media_name:
-            # jwpduf 轮询响应可能已携带带签名的 flow-content 直链（与图片路径一致），
-            # 直接复用；仅在没有直链时才通过 as29s 换取（部分模型如 abra 的
-            # media 名不被 as29s 接受，会返回 code=[5]）。
-            video_url = str(video_info.get("fifeUrl") or "").strip()
-        if not video_url and media_name:
+        # jwpduf 轮询响应可能已携带带签名的 flow-content 直链（与图片路径一致），
+        # 直接复用；仅在没有直链时才通过 as29s 换取（部分模型如 abra 的
+        # media 名不被 as29s 接受，会返回 code=[5]）。
+        video_url = str(video_info.get("fifeUrl") or "").strip()
+        if not video_url and media_lookup_id:
             video_url = (
                 await self.flow_client.get_media_url_redirect(
                     getattr(token, "st", ""),
-                media_name,
-                media_url_type="MEDIA_URL_TYPE_FULL_MEDIA",
+                    media_lookup_id,
+                    media_url_type="MEDIA_URL_TYPE_FULL_MEDIA",
                     google_cookies=getattr(token, "google_cookies", None),
                     token_id=getattr(token, "id", None),
                     project_id=project_id,
@@ -1474,11 +1475,11 @@ class GenerationHandler:
         video_media_id = (
             uuid_match.group(1)
             if uuid_match
-            else str(media_name or video_info.get("mediaGenerationId") or "")
+            else str(media_generation_id or media_lookup_id or "")
         )
 
         return {
-            "media_name": media_name,
+            "media_name": media_name or media_generation_id,
             "video_url": video_url,
             "video_media_id": video_media_id,
             "aspect_ratio": video_info.get("aspectRatio", "VIDEO_ASPECT_RATIO_LANDSCAPE"),
