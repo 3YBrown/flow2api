@@ -399,6 +399,41 @@ class RouteNormalizationTests(unittest.IsolatedAsyncioTestCase):
             video_url,
         )
 
+    async def test_check_video_status_surfaces_terminal_frontend_error(self):
+        operation_id = "11111111-1111-1111-1111-111111111111"
+        project_id = "22222222-2222-2222-2222-222222222222"
+        media_id = "33333333-3333-3333-3333-333333333333"
+        self.client._call_flow_frontend_rpc = AsyncMock(
+            return_value=[
+                operation_id,
+                project_id,
+                media_id,
+                None,
+                [4, [3, "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED"]],
+            ]
+        )
+
+        result = await self.client.check_video_status(
+            at="at-token",
+            operations=[
+                {
+                    "operation": {"name": operation_id},
+                    "name": operation_id,
+                    "mediaName": media_id,
+                    "projectId": project_id,
+                }
+            ],
+            google_cookies="SID=session-cookie",
+        )
+
+        operation = result["operations"][0]
+        self.assertEqual(operation["status"], "MEDIA_GENERATION_STATUS_FAILED")
+        self.assertEqual(
+            operation["operation"]["error"]["code"],
+            "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED",
+        )
+        self.assertIn("人物安全过滤", operation["operation"]["error"]["message"])
+
     async def test_generate_video_start_end_uses_v2_payload_for_interpolation_lite(
         self,
     ):

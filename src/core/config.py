@@ -239,10 +239,6 @@ class Config:
         return self._config["flow"]["poll_interval"]
 
     @property
-    def max_poll_attempts(self) -> int:
-        return self._config["flow"]["max_poll_attempts"]
-
-    @property
     def server_host(self) -> str:
         return self._config["server"]["host"]
 
@@ -432,7 +428,7 @@ class Config:
 
     @property
     def browser_recaptcha_settle_seconds(self) -> float:
-        """有头打码在 reload/clr 就绪后的额外等待秒数。"""
+        """自定义站点分数测试在 reload/clr 就绪后的额外等待秒数。"""
         value = self._config.get("captcha", {}).get(
             "browser_recaptcha_settle_seconds", 3.0
         )
@@ -440,6 +436,25 @@ class Config:
             return max(0.0, min(10.0, float(value)))
         except Exception:
             return 3.0
+
+    @property
+    def browser_flow_page_warmup_seconds(self) -> float:
+        """browser harvest 打开真实 Flow 页面后的稳定等待秒数。"""
+        value = self._config.get("captcha", {}).get(
+            "browser_flow_page_warmup_seconds", 6.0
+        )
+        try:
+            return max(0.0, min(30.0, float(value)))
+        except Exception:
+            return 6.0
+
+    def set_browser_flow_page_warmup_seconds(self, value: float):
+        """设置 browser harvest 页面预热等待秒数。"""
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        self._config["captcha"]["browser_flow_page_warmup_seconds"] = max(
+            0.0, min(30.0, float(value))
+        )
 
     @property
     def browser_idle_ttl_seconds(self) -> int:

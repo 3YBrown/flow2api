@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+import math
 import time
 from pathlib import Path
 from typing import Optional, AsyncGenerator, List, Dict, Any
@@ -18,6 +19,18 @@ from ..core.account_tiers import (
     supports_model_for_tier,
 )
 from .file_cache import FileCache
+
+
+def _video_poll_attempt_budget(
+    timeout_seconds: float,
+    poll_interval: float,
+    *,
+    upsample: bool = False,
+) -> int:
+    interval = max(0.1, float(poll_interval or 0))
+    timeout = max(interval, float(timeout_seconds or 0))
+    attempts = max(1, math.ceil(timeout / interval))
+    return attempts * (3 if upsample else 1)
 
 
 # Model configuration
@@ -2930,26 +2943,39 @@ class GenerationHandler:
             response_state = self._create_response_state()
 
         normalized_tier = normalize_user_paygate_tier(token.user_paygate_tier)
-        max_attempts = config.max_poll_attempts
-        poll_interval = config.poll_interval
-        
-        # 如果需要放大，轮询次数加倍（放大可能需要 30 分钟）
-        if upsample_config:
-            max_attempts = max_attempts * 3  # 放大需要更长时间
+        poll_interval = max(0.1, float(config.poll_interval))
+        max_attempts = _video_poll_attempt_budget(
+            config.video_timeout,
+            poll_interval,
+            upsample=bool(upsample_config),
+        )
+        poll_budget_seconds = max_attempts * poll_interval
+        poll_deadline = time.monotonic() + poll_budget_seconds
 
         consecutive_poll_errors = 0
         last_poll_error: Optional[Exception] = None
         max_consecutive_poll_errors = 3
 
         for attempt in range(max_attempts):
-            await asyncio.sleep(poll_interval)
+            remaining = poll_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(poll_interval, remaining))
+            remaining = poll_deadline - time.monotonic()
+            if remaining <= 0:
+                break
 
             try:
-                result = await self.flow_client.check_video_status(
-                    token.at,
-                    operations,
-                    token_id=token.id,
-                    google_cookies=getattr(token, "google_cookies", None),
+                # Include the status RPC itself in the wall-time budget. The outer
+                # deadline prevents slow retries from extending video_timeout.
+                result = await asyncio.wait_for(
+                    self.flow_client.check_video_status(
+                        token.at,
+                        operations,
+                        token_id=token.id,
+                        google_cookies=getattr(token, "google_cookies", None),
+                    ),
+                    timeout=remaining,
                 )
                 checked_operations = result.get("operations", [])
                 consecutive_poll_errors = 0
@@ -3227,16 +3253,6 @@ class GenerationHandler:
                     yield self._create_error_response(error_msg, status_code=502)
                     return
                     
-                elif status == "MEDIA_GENERATION_STATUS_ACTIVE" and attempt > 80:
-                    # 如果持续4分钟（80次 * 3秒 = 240秒）依然是 ACTIVE 状态，则判定为卡死
-                    error_msg = "视频生成超时 (上游卡顿超过4分钟，已自动取消)"
-                    await self._fail_video_task(checked_operations, error_msg)
-                    self._mark_generation_failed(generation_result, error_msg)
-                    if stream:
-                        yield self._create_stream_chunk(f"错误: {error_msg}\n")
-                    yield self._create_error_response(error_msg, status_code=504)
-                    return
-
             except Exception as e:
                 last_poll_error = e
                 consecutive_poll_errors += 1
@@ -3255,7 +3271,7 @@ class GenerationHandler:
         if last_poll_error is not None:
             error_msg = f"视频状态查询持续失败: {self._normalize_error_message(last_poll_error)}"
         else:
-            error_msg = f"视频生成超时 (已轮询 {max_attempts} 次)"
+            error_msg = f"视频生成超时 (超过 {int(poll_budget_seconds)} 秒仍未完成)"
         await self._fail_video_task(operations, error_msg)
         self._mark_generation_failed(generation_result, error_msg)
         yield self._create_error_response(error_msg, status_code=504)

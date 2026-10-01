@@ -19,9 +19,9 @@ import uuid
 import hashlib
 import json
 from copy import deepcopy
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Tuple, Union
 from datetime import datetime
-from urllib.parse import urlparse, unquote, parse_qs
+from urllib.parse import urlparse, parse_qsl
 
 from ..core.logger import debug_logger
 from ..core.browser_runtime_status import (
@@ -286,6 +286,16 @@ BROWSER_SESSION_COOKIE_TARGET_URLS = (
 )
 
 
+def _resolve_flow_page_warmup_seconds(value: Any) -> float:
+    """Resolve the Flow page warmup wait while preserving an explicit zero."""
+    if value is None:
+        value = 6.0
+    try:
+        return max(0.0, min(30.0, float(value)))
+    except (TypeError, ValueError):
+        return 6.0
+
+
 # ==========================================
 # 代理解析工具函数
 # ==========================================
@@ -360,10 +370,7 @@ def validate_browser_proxy_url(proxy_url: str) -> tuple[bool, str]:
 
 
 class TokenBrowser:
-    """简化版浏览器：每次获取 token 时启动新浏览器，用完即关
-    
-    每次都是新的随机 UA，避免长时间运行导致的各种问题
-    """
+    """共享浏览器槽位：复用 Chromium context，失败或空闲超时后回收。"""
 
     # UA pool updated on 2026-03-01 from browsers that scored >= 0.3.
     UA_LIST = [
@@ -1436,8 +1443,8 @@ class TokenBrowser:
         except Exception:
             pass
 
-        warmup_seconds = float(
-            getattr(config, "browser_flow_page_warmup_seconds", 6) or 6
+        warmup_seconds = _resolve_flow_page_warmup_seconds(
+            getattr(config, "browser_flow_page_warmup_seconds", None)
         )
         if warmup_seconds > 0:
             debug_logger.log_info(
@@ -2353,35 +2360,49 @@ class TokenBrowser:
         if not post_data:
             return None
 
-        try:
-            decoded = unquote(post_data)
-            token_match = re.search(
-                r'\[\\?"(0cAFcW[A-Za-z0-9_\-]+)\\?"', decoded
-            )
-            session_id = None
-            freq_raw = decoded[len("f.req="):]
-            amp_index = freq_raw.find("&")
-            outer = json.loads(
-                freq_raw[:amp_index] if amp_index >= 0 else freq_raw
-            )
-            inner = json.loads(outer[1])
-            if isinstance(inner, list) and inner:
-                session_id = str(inner[0] or "") or None
-        except Exception as e:
-            debug_logger.log_warning(
-                f"[BrowserCaptcha] Token-{self.token_id} 解析 StreamChat 请求体失败: "
-                f"{type(e).__name__}: {str(e)[:150]}"
-            )
-            return None
-        if not token_match:
+        harvest_result = self._parse_harvest_streamchat_post(post_data)
+        if not harvest_result:
             debug_logger.log_warning(
                 f"[BrowserCaptcha] Token-{self.token_id} StreamChat 请求体中未找到 token"
             )
             return None
         debug_logger.log_info(
             f"[BrowserCaptcha] Token-{self.token_id} harvest 成功: "
-            f"token_len={len(token_match.group(1))} session={session_id or 'n/a'}"
+            f"token_len={len(harvest_result['token'])} "
+            f"session={harvest_result.get('session_id') or 'n/a'}"
         )
+        return harvest_result
+
+    @staticmethod
+    def _parse_harvest_streamchat_post(
+        post_data: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Parse a native StreamChat form body into token and Flow session id."""
+        if not post_data:
+            return None
+
+        try:
+            freq_value = next(
+                value
+                for key, value in parse_qsl(post_data, keep_blank_values=True)
+                if key == "f.req"
+            )
+        except StopIteration:
+            return None
+
+        token_match = re.search(r"(0cAFcW[A-Za-z0-9_\-]+)", freq_value)
+        if not token_match:
+            return None
+
+        try:
+            outer = json.loads(freq_value)
+            inner = json.loads(outer[1]) if len(outer) > 1 else None
+            session_id = None
+            if isinstance(inner, list) and inner:
+                session_id = str(inner[0] or "").strip() or None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
         return {"token": token_match.group(1), "session_id": session_id}
 
     def get_last_harvest_session_id(self) -> Optional[str]:
@@ -2937,7 +2958,9 @@ class TokenBrowser:
         """Get a token from the shared browser unless a fatal browser error occurs."""
         async with self._semaphore:
             self._solve_inflight += 1
-            max_retries = 3
+            max_retries = max(
+                1, int(getattr(config, "browser_captcha_max_retries", 5) or 5)
+            )
 
             try:
                 for attempt in range(max_retries):
@@ -3280,12 +3303,7 @@ class BrowserCaptchaService:
                 }
 
         if self._browser_count > old_count:
-            warmup_tasks = [
-                self._warmup_browser_slot(browser_id)
-                for browser_id in range(old_count, self._browser_count)
-            ]
-            if warmup_tasks:
-                await asyncio.gather(*warmup_tasks, return_exceptions=True)
+            await self.warmup_browser_slots()
 
     def _log_stats(self):
         total = self._stats["req_total"]
@@ -3299,20 +3317,99 @@ class BrowserCaptchaService:
         
         rate = (valid_success / total * 100) if total > 0 else 0.0
 
-    async def _warmup_browser_slot(self, browser_id: int):
+    async def _warmup_browser_slot(
+        self,
+        browser_id: int,
+        *,
+        token_id: Optional[int] = None,
+        token_proxy_url: Optional[str] = None,
+    ):
         browser = await self._get_or_create_browser(browser_id)
         try:
-            await browser._get_or_create_shared_browser()
-            debug_logger.log_info(f"[BrowserCaptcha] warmed browser slot {browser_id}")
+            await browser._get_or_create_shared_browser(
+                token_proxy_url=token_proxy_url,
+                token_id=token_id,
+            )
+            debug_logger.log_info(
+                f"[BrowserCaptcha] warmed browser slot {browser_id} "
+                f"(token_id={token_id or '-'})"
+            )
         except Exception as e:
             debug_logger.log_warning(
                 f"[BrowserCaptcha] warmup for slot {browser_id} failed: {e}"
             )
 
+    async def _get_warmup_token_specs(self) -> List[Tuple[int, Optional[str]]]:
+        """Return account-bound warmup targets for the configured browser slots."""
+        if not self.db or not hasattr(self.db, "get_active_tokens"):
+            return []
+
+        try:
+            tokens = await self.db.get_active_tokens()
+        except Exception as e:
+            debug_logger.log_warning(
+                f"[BrowserCaptcha] 读取预热 token 列表失败: {e}"
+            )
+            return []
+
+        specs: List[Tuple[int, Optional[str]]] = []
+        for token in tokens:
+            if getattr(token, "ban_reason", None):
+                continue
+            token_key = getattr(token, "id", None)
+            if token_key is None:
+                continue
+            google_cookies = str(getattr(token, "google_cookies", "") or "").strip()
+            session_token = str(getattr(token, "st", "") or "").strip()
+            if not (google_cookies or session_token):
+                continue
+            proxy_url = str(getattr(token, "captcha_proxy_url", "") or "").strip()
+            specs.append((int(token_key), proxy_url or None))
+            if len(specs) >= self._browser_count:
+                break
+        return specs
+
     async def warmup_browser_slots(self):
+        token_specs = await self._get_warmup_token_specs()
+        token_spec_by_id = {
+            token_id: (token_id, token_proxy_url)
+            for token_id, token_proxy_url in token_specs
+        }
+        warmup_targets: List[Tuple[int, Optional[str]]] = []
+
+        async with self._browsers_lock:
+            if token_spec_by_id:
+                pending_specs = [
+                    spec
+                    for token_id, spec in token_spec_by_id.items()
+                    if token_id
+                    not in {
+                        self._slot_bound_token_id(browser_id)
+                        for browser_id in range(self._browser_count)
+                    }
+                ]
+                for browser_id in range(self._browser_count):
+                    browser = self._browsers.get(browser_id)
+                    bound_token_id = self._slot_bound_token_id(browser_id)
+                    if browser is not None and bound_token_id in token_spec_by_id:
+                        continue
+                    if not pending_specs:
+                        continue
+                    warmup_targets.append((browser_id, pending_specs.pop(0)))
+            elif not any(
+                self._has_warmed_browser_for_allocation(browser_id)
+                for browser_id in range(self._browser_count)
+            ):
+                # Keep dependency/runtime probing useful even before an account exists.
+                warmup_targets = [(0, None)]
+
         tasks = [
-            self._warmup_browser_slot(browser_id)
-            for browser_id in range(self._browser_count)
+            self._warmup_browser_slot(
+                browser_id,
+                token_id=spec[0],
+                token_proxy_url=spec[1],
+            )
+            for browser_id, spec in warmup_targets
         ]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -3327,6 +3424,14 @@ class BrowserCaptchaService:
         browser = self._browsers.get(slot_id)
         return bool(browser and getattr(browser, "has_shared_browser", lambda: False)())
 
+    def _slot_bound_token_id(self, slot_id: int) -> Optional[int]:
+        browser = self._browsers.get(slot_id)
+        bound_token_id = getattr(browser, "_shared_bound_token_id", None)
+        try:
+            return int(bound_token_id) if bound_token_id is not None else None
+        except (TypeError, ValueError):
+            return None
+
     def _reserve_slot_locked(self, slot_id: int):
         self._slot_reservations[slot_id] = self._slot_reservations.get(slot_id, 0) + 1
 
@@ -3340,12 +3445,18 @@ class BrowserCaptchaService:
             else:
                 self._slot_reservations[slot_id] = current - 1
 
-    async def _select_browser_id(self, project_id: Optional[str]) -> int:
-        # browser 模式不再按 project_id 粘住某个 slot。
-        # 优先复用空闲且已预热的共享浏览器，其次空闲冷槽位；全部繁忙时再轮询等待。
+    async def _select_browser_id(
+        self,
+        project_id: Optional[str],
+        token_id: Optional[int] = None,
+    ) -> int:
+        _ = project_id
+        expected_token_id = TokenBrowser._normalize_token_key(token_id)
         async with self._slot_allocation_lock:
             async with self._browsers_lock:
-                warmed_idle_slot: Optional[int] = None
+                matching_idle_slot: Optional[int] = None
+                unbound_warm_idle_slot: Optional[int] = None
+                cold_idle_slot: Optional[int] = None
                 idle_slot: Optional[int] = None
 
                 for offset in range(self._browser_count):
@@ -3355,16 +3466,36 @@ class BrowserCaptchaService:
 
                     if idle_slot is None:
                         idle_slot = slot_id
+
+                    browser = self._browsers.get(slot_id)
+                    if browser is None:
+                        if cold_idle_slot is None:
+                            cold_idle_slot = slot_id
+                        continue
+
+                    bound_token_id = self._slot_bound_token_id(slot_id)
                     if (
-                        warmed_idle_slot is None
+                        expected_token_id is not None
+                        and bound_token_id == expected_token_id
+                    ):
+                        matching_idle_slot = slot_id
+                        break
+                    if (
+                        bound_token_id is None
                         and self._has_warmed_browser_for_allocation(slot_id)
                     ):
-                        warmed_idle_slot = slot_id
-                        break
+                        if unbound_warm_idle_slot is None:
+                            unbound_warm_idle_slot = slot_id
 
-                selected_slot = (
-                    warmed_idle_slot if warmed_idle_slot is not None else idle_slot
-                )
+                if matching_idle_slot is not None:
+                    selected_slot = matching_idle_slot
+                elif expected_token_id is None and unbound_warm_idle_slot is not None:
+                    selected_slot = unbound_warm_idle_slot
+                elif cold_idle_slot is not None:
+                    selected_slot = cold_idle_slot
+                else:
+                    selected_slot = idle_slot
+
                 if selected_slot is not None:
                     self._round_robin_index = (selected_slot + 1) % self._browser_count
                     self._reserve_slot_locked(selected_slot)
@@ -3463,7 +3594,7 @@ class BrowserCaptchaService:
         # 全局并发限制（如果已配置）
         if self._token_semaphore:
             async with self._token_semaphore:
-                browser_id = await self._select_browser_id(project_id)
+                browser_id = await self._select_browser_id(project_id, token_id=token_id)
                 try:
                     browser = await self._get_or_create_browser(browser_id)
                     token, request_ref = await browser.get_token(
@@ -3489,7 +3620,7 @@ class BrowserCaptchaService:
                 fingerprint,
             )
         
-        browser_id = await self._select_browser_id(project_id)
+        browser_id = await self._select_browser_id(project_id, token_id=token_id)
         try:
             browser = await self._get_or_create_browser(browser_id)
             token, request_ref = await browser.get_token(
@@ -3606,7 +3737,7 @@ class BrowserCaptchaService:
         self._check_available()
 
         token_proxy_url = await self._resolve_token_proxy_url(token_id)
-        browser_id = await self._select_browser_id(project_id)
+        browser_id = await self._select_browser_id(project_id, token_id=token_id)
         try:
             browser = await self._get_or_create_browser(browser_id)
             response_payload = await browser.submit_flow_request(
