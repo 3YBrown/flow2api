@@ -791,7 +791,7 @@ class FlowFrontendMixin:
         inner = [
             str(session_id),
             [[[[str(prompt)]]]],
-            [f"projects/{project_id}", None, [recaptcha_token, 1], None, None, 3],
+            [f"projects/{project_id}", None, [recaptcha_token, 1], None, None, 1],
         ]
         return self._compact_json_dumps(
             [None, self._compact_json_dumps(inner)]

@@ -372,11 +372,94 @@ class CurrentFlowClientMixin:
             try:
                 if progress_callback:
                     await progress_callback("solving_image_captcha", 38)
+                personal_mode = config.captcha_method == "personal"
+                personal_native_compatible = (
+                    personal_mode
+                    and not image_inputs
+                    and str(model_name or "").upper() == "NARWHAL"
+                    and str(aspect_ratio or "").upper()
+                    == "IMAGE_ASPECT_RATIO_LANDSCAPE"
+                )
+                if personal_native_compatible:
+                    from .browser_captcha_personal import BrowserCaptchaService
+
+                    personal_service = getattr(
+                        self, "_personal_browser_service", None
+                    )
+                    if personal_service is None:
+                        personal_service = await BrowserCaptchaService.get_instance(
+                            getattr(self, "db", None)
+                        )
+                    attempt["recaptcha_ok"] = True
+                    if progress_callback:
+                        await progress_callback("submitting_image", 48)
+                    native_result = await personal_service.generate_native_image(
+                        project_id=project_id,
+                        prompt=prompt,
+                        token_id=token_id,
+                        timeout=max(
+                            self._get_runtime_config().flow_image_request_timeout, 120
+                        ),
+                    )
+                    if not native_result:
+                        raise RuntimeError("Personal native image generation failed")
+
+                    session_id = str(native_result.get("session_id") or "").strip()
+                    browser_id = f"personal:{session_id}" if session_id else None
+                    response_text = str(native_result.get("responseText") or "")
+                    frames = self._parse_batchexecute_frames(response_text)
+                    media_ids = self._extract_stream_chat_media_ids(frames)
+                    if not media_ids:
+                        raise RuntimeError(
+                            "Personal native StreamChat returned no generated media "
+                            f"(rawLength={native_result.get('rawLength')})"
+                        )
+
+                    fingerprint = native_result.get("fingerprint")
+                    if isinstance(fingerprint, dict) and fingerprint:
+                        self._set_request_fingerprint(fingerprint)
+
+                    if progress_callback:
+                        await progress_callback("processing_image", 72)
+                    media = []
+                    for media_id in media_ids[:2]:
+                        media_entry = await self.get_media(
+                            at,
+                            media_id,
+                            google_cookies=google_cookies,
+                            token_id=token_id,
+                            project_id=project_id,
+                        )
+                        if str(
+                            (media_entry.get("image") or {})
+                            .get("generatedImage", {})
+                            .get("fifeUrl")
+                            or ""
+                        ):
+                            media.append(media_entry)
+                    if not media:
+                        raise RuntimeError(
+                            "Personal native StreamChat media could not be resolved"
+                        )
+
+                    result = {"media": media, "frontendRpc": "StreamChat"}
+                    attempt["success"] = True
+                    attempt["duration_ms"] = int((time.time() - started_at) * 1000)
+                    trace["generation_attempts"].append(attempt)
+                    trace["final_success_attempt"] = retry_attempt + 1
+                    return result, session_id, trace
+
                 # 通道与 action 必须按打码方式配套：
-                # - browser (harvest)：页面原生 token + 原生会话 id，走 StreamChat；
-                #   页面实际执行的 reCAPTCHA action 为 CHAT_GENERATION。
+                # - personal 默认纯文生横图已在上面的原子浏览器流程处理；
+                #   其他 personal 参数组合使用第三方 token + ogiZ0b，避免丢失参数。
+                # - browser harvest 使用页面原生 token/session，走 StreamChat。
                 # - 第三方打码 (yescaptcha 等)：token 只被 batchexecute 通道接受，
                 #   走原 ogiZ0b 链路，action 保持上游既有的 IMAGE_GENERATION。
+                captcha_override = (
+                    self._resolve_batchexecute_captcha_override()
+                    if personal_mode
+                    else None
+                )
                 stream_transport = config.captcha_method == "browser"
                 token, browser_id = await self._get_recaptcha_token(
                     project_id,
@@ -385,6 +468,7 @@ class CurrentFlowClientMixin:
                     ),
                     token_id=token_id,
                     website_url=self._build_flow_frontend_project_page_url(project_id),
+                    method_override=captcha_override,
                 )
                 attempt["recaptcha_ok"] = bool(token)
                 if not token:
@@ -401,15 +485,16 @@ class CurrentFlowClientMixin:
                         "Browser harvest returned no Flow session id"
                     )
                 if harvest_session_id:
+                    request_timeout = max(
+                        self._get_runtime_config().flow_image_request_timeout, 90
+                    )
                     stream_result = await self._call_flow_stream_chat(
                         project_id=project_id,
                         prompt=prompt,
                         recaptcha_token=token,
                         session_id=harvest_session_id,
                         cookie_header="",
-                        timeout=max(
-                            self._get_runtime_config().flow_image_request_timeout, 90
-                        ),
+                        timeout=request_timeout,
                         cookie_storage=cookie_storage,
                     )
                     media_ids = list(stream_result.get("mediaIds") or [])
@@ -478,6 +563,20 @@ class CurrentFlowClientMixin:
                 attempt["error"] = str(error)[:240]
                 attempt["duration_ms"] = int((time.time() - started_at) * 1000)
                 trace["generation_attempts"].append(attempt)
+                if bool(getattr(error, "outcome_unknown", False)):
+                    raise
+                retry_handler = getattr(
+                    self, "_handle_retryable_generation_error", None
+                )
+                if retry_handler is not None:
+                    await retry_handler(
+                        error,
+                        retry_attempt,
+                        max_retries,
+                        browser_id,
+                        project_id,
+                        "Personal image generation",
+                    )
                 if retry_attempt >= max_retries - 1:
                     raise
             finally:

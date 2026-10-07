@@ -4586,7 +4586,10 @@ class _FlowClientBase(FlowFrontendMixin):
         """从 browser 请求句柄提取本次 harvest 对应的 Flow session id。"""
         if not isinstance(browser_ref, str):
             return None
-        browser_id, separator, request_ref = browser_ref.strip().partition(":")
+        raw = browser_ref.strip()
+        if raw.startswith("personal:"):
+            return raw.partition("personal:")[2] or None
+        browser_id, separator, request_ref = raw.partition(":")
         if not separator or not browser_id.isdigit() or not request_ref:
             return None
         return request_ref
@@ -5146,6 +5149,9 @@ class _FlowClientBase(FlowFrontendMixin):
                     and isinstance(solve_bundle.get("fingerprint"), dict)
                     else None
                 )
+                harvest_session_id = (
+                    str((solve_bundle or {}).get("session_id") or "").strip() or None
+                )
                 if isinstance(solve_bundle, dict) and token:
                     session_cookies = solve_bundle.get("session_cookies")
                     proxy_url = str(solve_bundle.get("proxy_url") or "").strip()
@@ -5182,7 +5188,11 @@ class _FlowClientBase(FlowFrontendMixin):
                         f"UA={effective_ua[:120]}, Accept-Language={effective_lang or '<empty>'}"
                     )
                 self._set_request_fingerprint(fingerprint if token else None)
-                return token, None
+                return token, (
+                    f"personal:{harvest_session_id}"
+                    if token and harvest_session_id
+                    else None
+                )
             except RuntimeError as e:
                 # 捕获 Docker 环境或依赖缺失的明确错误
                 error_msg = str(e)

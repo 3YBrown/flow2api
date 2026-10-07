@@ -485,6 +485,23 @@ class Config:
             return 6
 
     @property
+    def personal_solve_strategy(self) -> str:
+        """personal 打码策略：direct 用 trusted JS，harvest 原生截获，auto 自动降级。"""
+        value = str(
+            self._config.get("captcha", {}).get("personal_solve_strategy", "auto")
+        ).strip().lower()
+        return value if value in {"direct", "harvest", "auto"} else "auto"
+
+    def set_personal_solve_strategy(self, value: str):
+        """设置 personal 打码策略。"""
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"direct", "harvest", "auto"}:
+            normalized = "auto"
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        self._config["captcha"]["personal_solve_strategy"] = normalized
+
+    @property
     def personal_max_resident_tabs(self) -> int:
         """内置浏览器打码单实例共享标签页上限"""
         value = self._config.get("captcha", {}).get("personal_max_resident_tabs", 5)

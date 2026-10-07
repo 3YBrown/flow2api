@@ -59,6 +59,7 @@ browser_flow_page_warmup_seconds = 6.0  # browser harvest 打开 Flow 页面后�
 browser_count = 1  # browser 模式的有头浏览器实例数量
 browser_captcha_max_retries = 5  # browser 模式单次获取验证码的最大重试次数
 browser_captcha_generation_retries = 6  # 生成接口遇到 reCAPTCHA evaluation failed 时的总重试次数
+personal_solve_strategy = "auto"  # auto=优先 trusted JS、失败切原生 harvest；direct/harvest 可强制指定
 personal_project_pool_size = 4  # personal 模式下单个 Token 默认维护的项目池数量（仅影响项目轮换，不决定打码标签页数量）
 personal_max_resident_tabs = 5  # personal 模式共享打码标签页上限，所有 Token/project 共用这组 tab
 browser_personal_fresh_restart_every_n_solves = 10  # personal 模式成功获取多少个码后清理并重启浏览器，0 表示禁用
